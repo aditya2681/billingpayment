@@ -410,9 +410,6 @@ function OutletLayout() {
               value={activeOutlet._id}
               onChange={(value) => navigate(`/app/${value}`)}
             />
-            <button className="ghost-button" onClick={() => navigate("/select-outlet")} type="button">
-              Switch Outlet
-            </button>
           </div>
         </header>
 

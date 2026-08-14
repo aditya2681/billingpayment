@@ -14,6 +14,14 @@ MyBilling is a mobile-first bill payment tracking app built with React, Vite, an
 
 ## Local Development
 
+Important environment split:
+
+- Localhost uses `.env.local`, which is created by `npx convex dev`
+- Netlify uses its own `VITE_CONVEX_URL` environment variable in the Netlify dashboard
+- Convex dev and Convex prod are separate deployments, with separate env vars
+- Running `npx convex deploy` does not change your local `.env.local`
+- Running `npx convex dev` can relink `.env.local` to a different dev deployment, but it does not change Netlify production unless you also change Netlify env vars
+
 1. Install dependencies:
 
    ```bash
