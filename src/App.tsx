@@ -21,6 +21,7 @@ import {
   Files,
   LayoutDashboard,
   LogOut,
+  MoreHorizontal,
   Plus,
   ReceiptIndianRupee,
   ShieldCheck,
@@ -310,6 +311,7 @@ function OutletLayout() {
   const { signOut } = useAuthActions();
   const navigate = useNavigate();
   const location = useLocation();
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
 
   if (!outletId) return <Navigate to="/" replace />;
   if (current === undefined) {
@@ -336,6 +338,14 @@ function OutletLayout() {
     { to: `/app/${outletId}/bills/new`, label: "Add Bill", icon: FilePlus2 },
   ];
   const navLinks = current.profile.role === "OWNER" ? ownerLinks : employeeLinks;
+  const primaryMobileLinks =
+    current.profile.role === "OWNER"
+      ? navLinks.slice(0, 3)
+      : navLinks;
+  const moreMobileLinks =
+    current.profile.role === "OWNER"
+      ? navLinks.slice(3)
+      : [];
 
   return (
     <div className="app-shell">
@@ -416,8 +426,27 @@ function OutletLayout() {
           <Route path="outlets" element={<OutletsPage />} />
           <Route path="employees" element={<EmployeesPage />} />
         </Routes>
+        {isMoreOpen && moreMobileLinks.length > 0 ? (
+          <div className="mobile-more-sheet">
+            {moreMobileLinks.map((link) => {
+              const Icon = link.icon;
+              const active = location.pathname === link.to;
+              return (
+                <Link
+                  className={active ? "mobile-more-link active" : "mobile-more-link"}
+                  key={link.to}
+                  onClick={() => setIsMoreOpen(false)}
+                  to={link.to}
+                >
+                  <Icon size={18} />
+                  <span>{link.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
         <nav className="mobile-bottom-nav">
-          {navLinks.slice(0, current.profile.role === "OWNER" ? 5 : 2).map((link) => {
+          {primaryMobileLinks.map((link) => {
             const Icon = link.icon;
             const active = location.pathname === link.to;
             return (
@@ -431,6 +460,16 @@ function OutletLayout() {
               </Link>
             );
           })}
+          {moreMobileLinks.length > 0 ? (
+            <button
+              className={isMoreOpen ? "mobile-nav-link active" : "mobile-nav-link"}
+              onClick={() => setIsMoreOpen((currentValue) => !currentValue)}
+              type="button"
+            >
+              <MoreHorizontal size={18} />
+              <span>More</span>
+            </button>
+          ) : null}
         </nav>
       </main>
     </div>
@@ -447,6 +486,7 @@ function DashboardPage({
   const stats = useQuery(api.bills.dashboardBillStats, { outletId: outlet._id });
   const navigate = useNavigate();
   if (stats === undefined) return <CardSkeleton title="Loading dashboard" />;
+  const recentBillsPreview = stats.recentBills.slice(0, 3);
 
   return (
     <div className="page-stack">
@@ -454,14 +494,13 @@ function DashboardPage({
         <StatsCard label="Total Bills" value={String(stats.totalBills)} accent="blue" />
         <StatsCard label="Unpaid Bills" value={formatCurrency(stats.unpaidAmountPaise)} accent="red" />
         <StatsCard label="Paid Bills" value={formatCurrency(stats.paidAmountPaise)} accent="green" />
-        <StatsCard label="Role" value={current.profile.role === "OWNER" ? "Owner" : "Employee"} accent="gold" />
       </section>
 
       <section className="content-grid">
         <div className="surface">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Recent activity</p>
+              <p className="eyebrow">Minimal recent activity</p>
               <h2>Recent Bills</h2>
             </div>
             {current.profile.role === "OWNER" ? (
@@ -471,7 +510,7 @@ function DashboardPage({
             ) : null}
           </div>
           <div className="bill-list">
-            {stats.recentBills.map((bill) => (
+            {recentBillsPreview.map((bill) => (
               <div className="bill-row" key={bill._id}>
                 <div>
                   <strong>{bill.billNumber}</strong>
@@ -485,13 +524,18 @@ function DashboardPage({
                 </div>
               </div>
             ))}
+            {stats.recentBills.length > recentBillsPreview.length ? (
+              <div className="compact-note">
+                Showing {recentBillsPreview.length} recent bills out of {stats.recentBills.length}.
+              </div>
+            ) : null}
           </div>
         </div>
 
         <div className="surface">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Fast actions</p>
+              <p className="eyebrow">Keep it simple</p>
               <h2>Quick Actions</h2>
             </div>
           </div>
