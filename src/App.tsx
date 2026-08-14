@@ -1175,7 +1175,9 @@ function PaymentSuccessPage({ current }: { current: { profile: Profile } }) {
 }
 
 function DistributorsPage() {
-  const distributors = useQuery(api.distributors.listDistributors, { activeOnly: false }) ?? [];
+  const activeDistributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
+  const inactiveDistributors = useQuery(api.distributors.listDistributors, { activeOnly: false }) ?? [];
+  const distributors = [...activeDistributors, ...inactiveDistributors];
   const createDistributor = useMutation(api.distributors.createDistributor);
   const updateDistributor = useMutation(api.distributors.updateDistributor);
   const [search, setSearch] = useState("");
