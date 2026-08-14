@@ -160,7 +160,27 @@ textarea {
   gap: 10px;
 }
 
+.date-field {
+  position: relative;
+  display: grid;
+  gap: 10px;
+}
+
 .searchable-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  color: #172033;
+}
+
+.date-field-trigger {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -176,6 +196,59 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 18px;
   background: #fbfdff;
+}
+
+.date-picker-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #fbfdff;
+}
+
+.date-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.date-picker-weekdays span {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
+.date-picker-empty {
+  min-height: 36px;
+}
+
+.date-day {
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: white;
+  color: #172033;
+}
+
+.date-day.active {
+  background: #edf3ff;
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.icon-button {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
 }
 
 .searchable-select-options {
@@ -664,11 +737,11 @@ legend {
 
   .stats-card {
     border-radius: 18px;
-    padding: 16px;
+    padding: 14px;
   }
 
   .stats-card strong {
-    font-size: 1.4rem;
+    font-size: 1.15rem;
   }
 
   .section-head {
@@ -807,6 +880,26 @@ legend {
 
   .segment-group {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .stats-card {
+    padding: 12px;
+    min-height: 108px;
+    align-content: space-between;
+  }
+
+  .stats-card span {
+    font-size: 0.82rem;
+  }
+
+  .stats-card strong {
+    font-size: 1rem;
+    line-height: 1.2;
   }
 
   .mobile-bottom-nav {

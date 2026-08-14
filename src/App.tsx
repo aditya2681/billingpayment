@@ -7,12 +7,19 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { useConvexAuth, useAuthActions } from "@convex-dev/auth/react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  addMonths,
+  eachDayOfInterval,
   endOfMonth,
   format,
+  getDay,
+  isSameDay,
+  parseISO,
   startOfMonth,
   subMonths,
 } from "date-fns";
 import {
+  ChevronLeft,
+  ChevronRight,
   Building2,
   CircleDollarSign,
   CreditCard,
@@ -714,8 +721,8 @@ function ViewBillsPage({
           </div>
           {filters.datePreset === "DATE_RANGE" ? (
             <div className="date-row">
-              <FieldInput label="From" type="date" value={filters.fromDate} onChange={(value) => setFilters((curr) => ({ ...curr, fromDate: value }))} />
-              <FieldInput label="To" type="date" value={filters.toDate} onChange={(value) => setFilters((curr) => ({ ...curr, toDate: value }))} />
+              <DateField label="From" value={filters.fromDate} onChange={(value) => setFilters((curr) => ({ ...curr, fromDate: value }))} />
+              <DateField label="To" value={filters.toDate} onChange={(value) => setFilters((curr) => ({ ...curr, toDate: value }))} />
             </div>
           ) : null}
           <FieldInput label="Search" value={filters.search} onChange={(value) => setFilters((curr) => ({ ...curr, search: value }))} placeholder="bill no, distributor or amount" />
@@ -825,9 +832,8 @@ function PaymentStartPage({
           onChange={setSearch}
           placeholder="search by distributor, pending count or amount"
         />
-        <FieldInput
+        <DateField
           label="Payment Date"
-          type="date"
           value={paymentDate}
           onChange={setPaymentDate}
         />
@@ -1049,7 +1055,7 @@ function PaymentSummaryPage({
         </div>
       </div>
       <div className="stack-form">
-        <FieldInput label="Payment Date" type="date" value={paymentDate} onChange={setPaymentDate} />
+        <DateField label="Payment Date" value={paymentDate} onChange={setPaymentDate} />
         <SearchableSelect
           label="Bank Account"
           options={bankAccounts.map((item) => ({
@@ -1455,7 +1461,7 @@ function BillFormFields({
         onChange={(value) => setForm((curr) => ({ ...curr, distributorId: value }))}
       />
       <FieldInput label="Bill Number" value={form.billNumber} onChange={(value) => setForm((curr) => ({ ...curr, billNumber: value }))} />
-      <FieldInput label="Bill Date" type="date" value={form.billDate} onChange={(value) => setForm((curr) => ({ ...curr, billDate: value }))} />
+      <DateField label="Bill Date" value={form.billDate} onChange={(value) => setForm((curr) => ({ ...curr, billDate: value }))} />
       <FieldInput label="Amount" inputMode="decimal" value={form.amount} onChange={(value) => setForm((curr) => ({ ...curr, amount: value }))} />
       {error ? <p className="form-error">{error}</p> : null}
       <button className="primary-button" disabled={saving} type="submit">
@@ -1591,6 +1597,90 @@ function FieldInput({
         type={type}
         value={value}
       />
+    </label>
+  );
+}
+
+function DateField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const initialMonth = value ? parseISO(value) : new Date();
+  const [isOpen, setIsOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(startOfMonth(initialMonth));
+  const selectedDate = value ? parseISO(value) : null;
+  const monthStart = startOfMonth(visibleMonth);
+  const monthEnd = endOfMonth(visibleMonth);
+  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
+  const leadingEmptyDays = Array.from({ length: getDay(monthStart) });
+
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <div className="date-field">
+        <button
+          className="date-field-trigger"
+          onClick={() => setIsOpen((current) => !current)}
+          type="button"
+        >
+          <span>{value ? formatDateLabel(value) : `Select ${label}`}</span>
+          <span>{isOpen ? "Close" : "Pick"}</span>
+        </button>
+        {isOpen ? (
+          <div className="date-picker-panel">
+            <div className="date-picker-header">
+              <button
+                className="ghost-button icon-button"
+                onClick={() => setVisibleMonth((current) => subMonths(current, 1))}
+                type="button"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <strong>{format(visibleMonth, "MMMM yyyy")}</strong>
+              <button
+                className="ghost-button icon-button"
+                onClick={() => setVisibleMonth((current) => addMonths(current, 1))}
+                type="button"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <div className="date-picker-grid date-picker-weekdays">
+              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
+                <span key={day}>{day}</span>
+              ))}
+            </div>
+            <div className="date-picker-grid">
+              {leadingEmptyDays.map((_, index) => (
+                <span className="date-picker-empty" key={`empty-${index}`} />
+              ))}
+              {days.map((day) => {
+                const isSelected =
+                  selectedDate !== null && isSameDay(day, selectedDate);
+                return (
+                  <button
+                    className={isSelected ? "date-day active" : "date-day"}
+                    key={day.toISOString()}
+                    onClick={() => {
+                      onChange(format(day, "yyyy-MM-dd"));
+                      setIsOpen(false);
+                      setVisibleMonth(startOfMonth(day));
+                    }}
+                    type="button"
+                  >
+                    {format(day, "d")}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </label>
   );
 }
