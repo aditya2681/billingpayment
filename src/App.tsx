@@ -390,8 +390,6 @@ function OutletLayout() {
                 <LogOut size={16} />
               </button>
             </div>
-            <p className="eyebrow">Current Outlet</p>
-            <h1>{activeOutlet.name}</h1>
           </div>
           <div className="header-actions">
             <SearchableSelect
