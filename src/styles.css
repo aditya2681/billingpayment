@@ -450,6 +450,14 @@ textarea {
   gap: 16px;
 }
 
+.section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .app-header {
   position: sticky;
   top: 0;
@@ -650,6 +658,52 @@ textarea {
   background: white;
 }
 
+.master-list {
+  display: grid;
+  gap: 14px;
+}
+
+.master-card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: white;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.master-card-main {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+
+.master-card-main > div {
+  display: grid;
+  gap: 6px;
+}
+
+.master-card-main small {
+  color: var(--text-soft);
+}
+
+.master-card-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.master-card-actions .ghost-button,
+.master-card-actions .danger-button {
+  width: auto;
+}
+
 .checkbox-group {
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -754,6 +808,7 @@ legend {
     flex-direction: column;
   }
 
+  .section-actions,
   .section-head .ghost-button,
   .section-head .primary-button {
     width: 100%;
@@ -766,7 +821,10 @@ legend {
 
   .bill-row,
   .pending-distributor-main,
-  .sticky-summary {
+  .sticky-summary,
+  .master-card-main,
+  .master-card-actions,
+  .section-actions {
     flex-direction: column;
     align-items: flex-start;
   }

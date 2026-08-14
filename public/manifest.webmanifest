@@ -1,0 +1,18 @@
+{
+  "name": "MyBilling",
+  "short_name": "MyBilling",
+  "description": "Simple billing and payment tracking for outlet-based businesses.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef3fb",
+  "theme_color": "#2062f4",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

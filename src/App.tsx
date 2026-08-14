@@ -33,6 +33,7 @@ import {
   ReceiptIndianRupee,
   ShieldCheck,
   Store,
+  Trash2,
   Users,
 } from "lucide-react";
 import {
@@ -776,9 +777,19 @@ function BillDetailsPage({ current }: { current: { profile: Profile } }) {
           <p className="eyebrow">Bill details</p>
           <h2>{data.bill.billNumber}</h2>
         </div>
-        <Link className="ghost-button" to={`/app/${outletId}/bills/${data.bill._id}/edit`}>
-          Edit Bill
-        </Link>
+        <div className="section-actions">
+          {data.bill.status === "UNPAID" ? (
+            <Link
+              className="primary-button"
+              to={`/app/${outletId}/payments/pending?distributorId=${data.bill.distributorId}&paymentDate=${todayIso()}&billId=${data.bill._id}`}
+            >
+              Pay This Bill
+            </Link>
+          ) : null}
+          <Link className="ghost-button" to={`/app/${outletId}/bills/${data.bill._id}/edit`}>
+            Edit Bill
+          </Link>
+        </div>
       </div>
       <InfoGrid
         items={[
@@ -896,6 +907,7 @@ function PendingBillsPage({
 }) {
   const [searchParams] = useSearchParams();
   const distributorId = searchParams.get("distributorId");
+  const billId = searchParams.get("billId");
   const paymentDate = searchParams.get("paymentDate") ?? todayIso();
   const pendingBills = useQuery(
     api.bills.getPendingBills,
@@ -909,6 +921,8 @@ function PendingBillsPage({
 
   return (
     <PendingBillsContent
+      key={`${distributorId}-${billId ?? "all"}`}
+      prefilledBillId={billId}
       distributorId={distributorId}
       navigate={navigate}
       outletId={outlet._id}
@@ -919,19 +933,25 @@ function PendingBillsPage({
 }
 
 function PendingBillsContent({
+  prefilledBillId,
   distributorId,
   navigate,
   outletId,
   paymentDate,
   pendingBills,
 }: {
+  prefilledBillId: string | null;
   distributorId: string;
   navigate: ReturnType<typeof useNavigate>;
   outletId: Id<"outlets">;
   paymentDate: string;
   pendingBills: Doc<"bills">[];
 }) {
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    prefilledBillId && pendingBills.some((bill) => bill._id === prefilledBillId)
+      ? [prefilledBillId]
+      : [],
+  );
 
   const totalAmount = pendingBills
     .filter((bill) => selectedIds.includes(bill._id))
@@ -947,6 +967,11 @@ function PendingBillsContent({
           </div>
         </div>
         <div className="bill-list">
+          {prefilledBillId ? (
+            <div className="compact-note">
+              This bill was preselected from View Bills. You can keep just this one, or add more bills from the same distributor.
+            </div>
+          ) : null}
           <button
             className="ghost-button"
             onClick={() => setSelectedIds(pendingBills.map((bill) => bill._id))}
@@ -1153,29 +1178,136 @@ function DistributorsPage() {
   const distributors = useQuery(api.distributors.listDistributors, { activeOnly: false }) ?? [];
   const createDistributor = useMutation(api.distributors.createDistributor);
   const updateDistributor = useMutation(api.distributors.updateDistributor);
+  const [search, setSearch] = useState("");
   const [form, setForm] = useState({ name: "", gstNumber: "", phone: "", address: "" });
   const [editing, setEditing] = useState<Doc<"distributors"> | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [activeTab, setActiveTab] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
+
+  const filteredDistributors = distributors.filter((item) => {
+    const matchesTab = activeTab === "ACTIVE" ? item.active : !item.active;
+    if (!matchesTab) return false;
+    const term = search.trim().toLowerCase();
+    if (!term) return true;
+    return [item.name, item.gstNumber, item.phone ?? "", item.address ?? ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(term);
+  });
+
+  function resetForm() {
+    setEditing(null);
+    setShowForm(false);
+    setForm({ name: "", gstNumber: "", phone: "", address: "" });
+  }
+
+  function startCreate() {
+    setEditing(null);
+    setShowForm(true);
+    setForm({ name: "", gstNumber: "", phone: "", address: "" });
+  }
+
+  function startEdit(item: Doc<"distributors">) {
+    setEditing(item);
+    setShowForm(true);
+    setForm({
+      name: item.name,
+      gstNumber: item.gstNumber,
+      phone: item.phone ?? "",
+      address: item.address ?? "",
+    });
+  }
+
+  async function toggleDistributor(item: Doc<"distributors">, active: boolean) {
+    await updateDistributor({
+      distributorId: item._id,
+      name: item.name,
+      gstNumber: item.gstNumber,
+      phone: item.phone ?? undefined,
+      address: item.address ?? undefined,
+      active,
+    });
+    if (editing?._id === item._id) {
+      resetForm();
+    }
+  }
 
   return (
-    <MasterPage
-      title="Distributors"
-      subtitle="Owner-level distributor master shared across outlets."
-      items={distributors.map((item) => ({
-        id: item._id,
-        title: item.name,
-        subtitle: item.gstNumber,
-        active: item.active,
-        onEdit: () => {
-          setEditing(item);
-          setForm({
-            name: item.name,
-            gstNumber: item.gstNumber,
-            phone: item.phone ?? "",
-            address: item.address ?? "",
-          });
-        },
-      }))}
-      form={
+    <section className="content-grid">
+      <div className="surface page-stack">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Masters</p>
+            <h2>Distributors</h2>
+            <p>View distributors first, then add, edit, or remove them when needed.</p>
+          </div>
+          <button className="primary-button" onClick={startCreate} type="button">
+            <Plus size={18} />
+            Add Distributor
+          </button>
+        </div>
+        <FieldInput
+          label="Search Distributor"
+          value={search}
+          onChange={setSearch}
+          placeholder="Search by name, GST, phone or address"
+        />
+        <div className="segment-group">
+          <button
+            className={activeTab === "ACTIVE" ? "segment active" : "segment"}
+            onClick={() => setActiveTab("ACTIVE")}
+            type="button"
+          >
+            Active
+          </button>
+          <button
+            className={activeTab === "INACTIVE" ? "segment active" : "segment"}
+            onClick={() => setActiveTab("INACTIVE")}
+            type="button"
+          >
+            Inactive
+          </button>
+        </div>
+        <div className="master-list">
+          {filteredDistributors.map((item) => (
+            <div className="master-card" key={item._id}>
+              <button className="master-card-main" onClick={() => startEdit(item)} type="button">
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>{item.gstNumber}</span>
+                  <small>{item.phone || item.address || "Phone or address can be added later"}</small>
+                </div>
+                <span className={item.active ? "badge paid" : "badge unpaid"}>
+                  {item.active ? "Active" : "Inactive"}
+                </span>
+              </button>
+              <div className="master-card-actions">
+                <button className="ghost-button" onClick={() => startEdit(item)} type="button">
+                  Edit
+                </button>
+                {item.active ? (
+                  <button className="danger-button" onClick={() => void toggleDistributor(item, false)} type="button">
+                    <Trash2 size={16} />
+                    Delete
+                  </button>
+                ) : (
+                  <button className="ghost-button" onClick={() => void toggleDistributor(item, true)} type="button">
+                    Restore
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          {filteredDistributors.length === 0 ? (
+            <EmptyState
+              title={activeTab === "ACTIVE" ? "No distributors found." : "No inactive distributors."}
+              subtitle={search ? "Try a different search." : activeTab === "ACTIVE" ? "Add your first distributor to start billing." : "Deleted distributors will appear here."}
+            />
+          ) : null}
+        </div>
+      </div>
+      <div className="surface">
+        {showForm ? (
         <form
           className="stack-form"
           onSubmit={(event) => {
@@ -1187,21 +1319,44 @@ function DistributorsPage() {
               address: form.address || undefined,
             };
             if (editing) {
-              void updateDistributor({ distributorId: editing._id, active: editing.active, ...payload }).then(() => setEditing(null));
+              void updateDistributor({ distributorId: editing._id, active: editing.active, ...payload }).then(() => resetForm());
             } else {
-              void createDistributor(payload);
+              void createDistributor(payload).then(() => resetForm());
             }
-            setForm({ name: "", gstNumber: "", phone: "", address: "" });
           }}
         >
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">{editing ? "Edit distributor" : "New distributor"}</p>
+              <h2>{editing ? editing.name : "Add Distributor"}</h2>
+              <p>Keep the master simple so bill entry and payments stay faster.</p>
+            </div>
+          </div>
           <FieldInput label="Distributor Name" value={form.name} onChange={(value) => setForm((curr) => ({ ...curr, name: value }))} />
           <FieldInput label="GST Number" value={form.gstNumber} onChange={(value) => setForm((curr) => ({ ...curr, gstNumber: value }))} />
           <FieldInput label="Phone" value={form.phone} onChange={(value) => setForm((curr) => ({ ...curr, phone: value }))} />
           <FieldInput label="Address" value={form.address} onChange={(value) => setForm((curr) => ({ ...curr, address: value }))} />
-          <button className="primary-button" type="submit">{editing ? "Update Distributor" : "Save Distributor"}</button>
+          <div className="button-row">
+            <button className="primary-button" type="submit">{editing ? "Update Distributor" : "Save Distributor"}</button>
+            <button className="ghost-button" onClick={resetForm} type="button">
+              Cancel
+            </button>
+          </div>
+          {editing?.active ? (
+            <button className="danger-button" onClick={() => void toggleDistributor(editing, false)} type="button">
+              <Trash2 size={16} />
+              Delete Distributor
+            </button>
+          ) : null}
         </form>
-      }
-    />
+        ) : (
+          <div className="empty-state">
+            <strong>Select a distributor or add a new one.</strong>
+            <span>The form stays hidden until you choose an item, so this page remains easier to scan on mobile.</span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1697,6 +1852,7 @@ function SearchableSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const selectedOption =
     options.find((option) => option.value === value) ?? null;
   const filteredOptions = useMemo(() => {
@@ -1710,8 +1866,19 @@ function SearchableSelect({
     });
   }, [options, search]);
 
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (wrapperRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+      setSearch("");
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
   return (
-    <label className={`field ${className ?? ""}`.trim()}>
+    <div className={`field ${className ?? ""}`.trim()} ref={wrapperRef}>
       <span>{label}</span>
       <div className="searchable-select">
         <button
@@ -1720,7 +1887,7 @@ function SearchableSelect({
           type="button"
         >
           <span>{selectedOption?.label || `Select ${label}`}</span>
-          <span>{open ? "Close" : "Search"}</span>
+          <span>{selectedOption ? "Change" : "Search"}</span>
         </button>
         {open ? (
           <div className="searchable-select-panel">
@@ -1759,7 +1926,7 @@ function SearchableSelect({
           </div>
         ) : null}
       </div>
-    </label>
+    </div>
   );
 }
 

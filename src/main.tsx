@@ -17,3 +17,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ConvexAuthProvider>
   </React.StrictMode>,
 );
+
+if ("serviceWorker" in navigator) {
+  void window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
+}
