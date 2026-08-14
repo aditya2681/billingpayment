@@ -367,7 +367,19 @@ function OutletLayout() {
 
       <main className="main-shell">
         <header className="app-header">
-          <div>
+          <div className="app-header-copy">
+            <div className="mobile-brand-row">
+              <BrandBlock compact />
+              <button
+                className="ghost-button mobile-signout"
+                onClick={() => {
+                  void signOut().then(() => navigate("/login"));
+                }}
+                type="button"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
             <p className="eyebrow">Current Outlet</p>
             <h1>{activeOutlet.name}</h1>
           </div>
@@ -404,6 +416,22 @@ function OutletLayout() {
           <Route path="outlets" element={<OutletsPage />} />
           <Route path="employees" element={<EmployeesPage />} />
         </Routes>
+        <nav className="mobile-bottom-nav">
+          {navLinks.slice(0, current.profile.role === "OWNER" ? 5 : 2).map((link) => {
+            const Icon = link.icon;
+            const active = location.pathname === link.to;
+            return (
+              <Link
+                className={active ? "mobile-nav-link active" : "mobile-nav-link"}
+                key={link.to}
+                to={link.to}
+              >
+                <Icon size={18} />
+                <span>{link.label === "Dashboard" ? "Home" : link.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
       </main>
     </div>
   );
