@@ -1036,6 +1036,8 @@ function PaymentSummaryPage({
     api.bills.getPendingBills,
     distributorId ? { outletId: outlet._id, distributorId: distributorId as Id<"distributors"> } : "skip",
   );
+  const activeDistributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
+  const inactiveDistributors = useQuery(api.distributors.listDistributors, { activeOnly: false }) ?? [];
   const bankAccounts = useQuery(api.bankAccounts.listBankAccounts, { activeOnly: true }) ?? [];
   const recordPayment = useMutation(api.payments.recordPayment);
   const [bankAccountId, setBankAccountId] = useState("");
@@ -1046,6 +1048,8 @@ function PaymentSummaryPage({
 
   if (current.profile.role !== "OWNER") return <AccessDenied />;
   if (!distributorId || pendingBills === undefined) return <CardSkeleton title="Loading payment summary" />;
+  const distributor =
+    [...activeDistributors, ...inactiveDistributors].find((item) => item._id === distributorId) ?? null;
   const selectedBills = pendingBills.filter((bill) => billIds.includes(bill._id));
   const totalAmount = selectedBills.reduce((sum, bill) => sum + bill.amountPaise, 0);
 
@@ -1077,6 +1081,37 @@ function PaymentSummaryPage({
         </div>
       </div>
       <div className="stack-form">
+        {distributor ? (
+          <div className="summary-box">
+            <div className="summary-total">
+              <div>
+                <span>Distributor</span>
+                <strong>{distributor.name}</strong>
+              </div>
+              <span className={distributor.active ? "badge paid" : "badge unpaid"}>
+                {distributor.active ? "Active" : "Inactive"}
+              </span>
+            </div>
+            <div className="info-grid">
+              <div className="info-item">
+                <span>GST Number</span>
+                <strong>{distributor.gstNumber}</strong>
+              </div>
+              <div className="info-item">
+                <span>Phone</span>
+                <strong>{distributor.phone || "-"}</strong>
+              </div>
+              <div className="info-item">
+                <span>Address</span>
+                <strong>{distributor.address || "-"}</strong>
+              </div>
+              <div className="info-item">
+                <span>Selected Bills</span>
+                <strong>{selectedBills.length}</strong>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <DateField label="Payment Date" value={paymentDate} onChange={setPaymentDate} />
         <SearchableSelect
           label="Bank Account"
@@ -1579,16 +1614,42 @@ function BillFormFields({
   const billData = useQuery(api.bills.getBill, billId ? { billId: billId as Id<"bills"> } : "skip");
   const navigate = useNavigate();
   const [form, setForm] = useState(initialForm);
+  const duplicateCandidates =
+    useQuery(
+      api.bills.findPotentialDuplicateBill,
+      form.distributorId && form.billDate && Number(form.amount) > 0
+        ? {
+            outletId: outlet._id,
+            distributorId: form.distributorId as Id<"distributors">,
+            billDate: form.billDate,
+            amountPaise: toPaise(form.amount),
+            excludeBillId: billId ? (billId as Id<"bills">) : undefined,
+          }
+        : "skip",
+    ) ?? [];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError("");
+    const allowSimilarDuplicate =
+      duplicateCandidates.length > 0
+        ? window.confirm(
+            `A bill with the same distributor, date and amount already exists (${duplicateCandidates
+              .map((item) => item.billNumber)
+              .join(", ")}). Do you still want to save this bill?`,
+          )
+        : false;
+    if (duplicateCandidates.length > 0 && !allowSimilarDuplicate) {
+      setSaving(false);
+      return;
+    }
     const payload = {
       distributorId: form.distributorId as Id<"distributors">,
       billNumber: form.billNumber,
       billDate: form.billDate,
       amountPaise: toPaise(form.amount),
+      allowSimilarDuplicate,
     };
 
     try {
@@ -1617,6 +1678,14 @@ function BillFormFields({
       <FieldInput label="Bill Number" value={form.billNumber} onChange={(value) => setForm((curr) => ({ ...curr, billNumber: value }))} />
       <DateField label="Bill Date" value={form.billDate} onChange={(value) => setForm((curr) => ({ ...curr, billDate: value }))} />
       <FieldInput label="Amount" inputMode="decimal" value={form.amount} onChange={(value) => setForm((curr) => ({ ...curr, amount: value }))} />
+      {duplicateCandidates.length > 0 ? (
+        <div className="compact-note warning-note">
+          Same distributor, same date and same amount already exist in bill
+          {duplicateCandidates.length > 1 ? "s" : ""}:{" "}
+          {duplicateCandidates.map((item) => item.billNumber).join(", ")}.
+          You can still save it after confirmation.
+        </div>
+      ) : null}
       {error ? <p className="form-error">{error}</p> : null}
       <button className="primary-button" disabled={saving} type="submit">
         {saving ? "Saving..." : isEdit ? "Update Bill" : "Save Bill"}
@@ -1855,6 +1924,7 @@ function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const selectedOption =
     options.find((option) => option.value === value) ?? null;
   const filteredOptions = useMemo(() => {
@@ -1870,6 +1940,10 @@ function SearchableSelect({
 
   useEffect(() => {
     if (!open) return;
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
     function handlePointerDown(event: PointerEvent) {
       if (wrapperRef.current?.contains(event.target as Node)) return;
       setOpen(false);
@@ -1885,7 +1959,13 @@ function SearchableSelect({
       <div className="searchable-select">
         <button
           className="searchable-select-trigger"
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => {
+            if (!open) {
+              setOpen(true);
+              return;
+            }
+            inputRef.current?.focus();
+          }}
           type="button"
         >
           <span>{selectedOption?.label || `Select ${label}`}</span>
@@ -1894,8 +1974,10 @@ function SearchableSelect({
         {open ? (
           <div className="searchable-select-panel">
             <input
+              autoFocus
               onChange={(event) => setSearch(event.target.value)}
               placeholder={`Search ${label.toLowerCase()}`}
+              ref={inputRef}
               value={search}
             />
             <div className="searchable-select-options">

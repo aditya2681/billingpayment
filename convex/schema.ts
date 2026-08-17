@@ -82,6 +82,11 @@ export default defineSchema({
       "distributorId",
       "status",
     ])
+    .index("by_outlet_id_and_distributor_id_and_bill_date", [
+      "outletId",
+      "distributorId",
+      "billDate",
+    ])
     .index("by_outlet_id_and_bill_date", ["outletId", "billDate"])
     .index("by_outlet_id_and_distributor_id_and_bill_number_normalized", [
       "outletId",

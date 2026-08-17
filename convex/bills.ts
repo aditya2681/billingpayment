@@ -37,6 +37,33 @@ const billFiltersValidator = {
   search: v.optional(v.string()),
 };
 
+async function listSimilarBillsByDateAndAmount(
+  ctx: QueryCtx,
+  args: {
+    outletId: Id<"outlets">;
+    distributorId: Id<"distributors">;
+    billDate: string;
+    amountPaise: number;
+    excludeBillId?: Id<"bills">;
+  },
+) {
+  const rows = await ctx.db
+    .query("bills")
+    .withIndex("by_outlet_id_and_distributor_id_and_bill_date", (q) =>
+      q
+        .eq("outletId", args.outletId)
+        .eq("distributorId", args.distributorId)
+        .eq("billDate", args.billDate),
+    )
+    .take(20);
+
+  return rows.filter(
+    (bill) =>
+      bill.amountPaise === args.amountPaise &&
+      bill._id !== args.excludeBillId,
+  );
+}
+
 export const dashboardBillStats = query({
   args: {
     outletId: v.id("outlets"),
@@ -251,6 +278,32 @@ export const listPendingDistributorSummaries = query({
   },
 });
 
+export const findPotentialDuplicateBill = query({
+  args: {
+    outletId: v.id("outlets"),
+    distributorId: v.id("distributors"),
+    billDate: v.string(),
+    amountPaise: v.number(),
+    excludeBillId: v.optional(v.id("bills")),
+  },
+  handler: async (ctx, args) => {
+    const access = await requireOutletAccess(ctx, args.outletId);
+    const distributor = await ctx.db.get(args.distributorId);
+    if (distributor === null || distributor.ownerProfileId !== access.ownerProfileId) {
+      throw new Error("Distributor not found.");
+    }
+
+    const duplicates = await listSimilarBillsByDateAndAmount(ctx, args);
+    return duplicates.map((bill) => ({
+      _id: bill._id,
+      billNumber: bill.billNumber,
+      billDate: bill.billDate,
+      amountPaise: bill.amountPaise,
+      status: bill.status,
+    }));
+  },
+});
+
 export const createBill = mutation({
   args: {
     outletId: v.id("outlets"),
@@ -258,6 +311,7 @@ export const createBill = mutation({
     billNumber: v.string(),
     billDate: v.string(),
     amountPaise: v.number(),
+    allowSimilarDuplicate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const access = await requireOutletAccess(ctx, args.outletId);
@@ -283,6 +337,11 @@ export const createBill = mutation({
 
     if (duplicate !== null) {
       throw new Error("A bill with the same distributor and bill number already exists.");
+    }
+
+    const similarBills = await listSimilarBillsByDateAndAmount(ctx, args);
+    if (similarBills.length > 0 && !args.allowSimilarDuplicate) {
+      throw new Error("A bill with the same distributor, date and amount already exists. Confirm to save another bill.");
     }
 
     const now = Date.now();
@@ -322,6 +381,7 @@ export const updateBill = mutation({
     billNumber: v.string(),
     billDate: v.string(),
     amountPaise: v.number(),
+    allowSimilarDuplicate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const bill = await ctx.db.get(args.billId);
@@ -335,11 +395,37 @@ export const updateBill = mutation({
       throw new Error("Distributor not found.");
     }
 
+    const billNumberNormalized = normalizeBillNumber(args.billNumber);
+    const duplicateBillNumber = await ctx.db
+      .query("bills")
+      .withIndex("by_outlet_id_and_distributor_id_and_bill_number_normalized", (q) =>
+        q
+          .eq("outletId", bill.outletId)
+          .eq("distributorId", args.distributorId)
+          .eq("billNumberNormalized", billNumberNormalized),
+      )
+      .unique();
+
+    if (duplicateBillNumber !== null && duplicateBillNumber._id !== bill._id) {
+      throw new Error("A bill with the same distributor and bill number already exists.");
+    }
+
+    const similarBills = await listSimilarBillsByDateAndAmount(ctx, {
+      outletId: bill.outletId,
+      distributorId: args.distributorId,
+      billDate: args.billDate,
+      amountPaise: args.amountPaise,
+      excludeBillId: bill._id,
+    });
+    if (similarBills.length > 0 && !args.allowSimilarDuplicate) {
+      throw new Error("A bill with the same distributor, date and amount already exists. Confirm to save another bill.");
+    }
+
     const before = JSON.stringify(bill);
     await ctx.db.patch(bill._id, {
       distributorId: args.distributorId,
       billNumber: args.billNumber.trim(),
-      billNumberNormalized: normalizeBillNumber(args.billNumber),
+      billNumberNormalized,
       billDate: args.billDate,
       amountPaise: args.amountPaise,
       updatedByProfileId: access.profile._id,
