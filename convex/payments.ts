@@ -52,6 +52,104 @@ export const getPayment = query({
   },
 });
 
+export const listPayments = query({
+  args: {
+    outletId: v.id("outlets"),
+    distributorId: v.optional(v.id("distributors")),
+    billDateFrom: v.optional(v.string()),
+    billDateTo: v.optional(v.string()),
+    paymentDateFrom: v.optional(v.string()),
+    paymentDateTo: v.optional(v.string()),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const access = await requireOutletAccess(ctx, args.outletId);
+    let payments = await ctx.db
+      .query("payments")
+      .withIndex("by_outlet_id_and_payment_date", (q) =>
+        q.eq("outletId", args.outletId),
+      )
+      .take(300);
+
+    payments = payments.filter((payment) => payment.ownerProfileId === access.ownerProfileId);
+
+    if (args.distributorId) {
+      payments = payments.filter((payment) => payment.distributorId === args.distributorId);
+    }
+
+    if (args.paymentDateFrom) {
+      const paymentDateFrom = args.paymentDateFrom;
+      payments = payments.filter((payment) => payment.paymentDate >= paymentDateFrom);
+    }
+
+    if (args.paymentDateTo) {
+      const paymentDateTo = args.paymentDateTo;
+      payments = payments.filter((payment) => payment.paymentDate <= paymentDateTo);
+    }
+
+    const paymentRows = await Promise.all(
+      payments.map(async (payment) => {
+        const distributor = await ctx.db.get(payment.distributorId);
+        const bankAccount = await ctx.db.get(payment.bankAccountId);
+        const paymentBills = await ctx.db
+          .query("paymentBills")
+          .withIndex("by_payment_id", (q) => q.eq("paymentId", payment._id))
+          .take(200);
+        const bills = await Promise.all(
+          paymentBills.map(async (paymentBill) => {
+            const bill = await ctx.db.get(paymentBill.billId);
+            if (bill === null) return null;
+            return {
+              _id: bill._id,
+              billNumber: bill.billNumber,
+              billDate: bill.billDate,
+              amountPaise: paymentBill.amountAtPaymentPaise,
+            };
+          }),
+        );
+
+        return {
+          payment,
+          distributor,
+          bankAccount: maskBankAccount(bankAccount),
+          bills: bills.filter((bill): bill is NonNullable<(typeof bills)[number]> => bill !== null),
+        };
+      }),
+    );
+
+    const billDateFilteredRows = paymentRows.filter((row) => {
+      if (!args.billDateFrom && !args.billDateTo) {
+        return true;
+      }
+      return row.bills.some((bill) => {
+        if (args.billDateFrom && bill.billDate < args.billDateFrom) {
+          return false;
+        }
+        if (args.billDateTo && bill.billDate > args.billDateTo) {
+          return false;
+        }
+        return true;
+      });
+    });
+
+    const searchTerm = args.search?.trim().toLowerCase();
+    const filteredRows = billDateFilteredRows.filter((row) => {
+      if (!searchTerm) return true;
+      const totalAmount = (row.payment.totalAmountPaise / 100).toFixed(2);
+      return (
+        row.distributor?.name.toLowerCase().includes(searchTerm) ||
+        row.bankAccount?.bankName.toLowerCase().includes(searchTerm) ||
+        totalAmount.includes(searchTerm) ||
+        row.bills.some((bill) => bill.billNumber.toLowerCase().includes(searchTerm))
+      );
+    });
+
+    return filteredRows.sort((a, b) =>
+      b.payment.paymentDate.localeCompare(a.payment.paymentDate),
+    );
+  },
+});
+
 export const recordPayment = mutation({
   args: {
     outletId: v.id("outlets"),

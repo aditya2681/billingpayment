@@ -590,6 +590,53 @@ textarea {
   gap: 14px;
 }
 
+.filter-accordion {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fbfdff;
+  overflow: hidden;
+}
+
+.filter-accordion.open {
+  background: #f7faff;
+}
+
+.filter-accordion-trigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.filter-accordion-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.filter-accordion-copy span {
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.filter-accordion-body {
+  border-top: 1px solid var(--border);
+  padding: 14px 16px 16px;
+}
+
+.accordion-icon {
+  color: var(--text-soft);
+  transition: transform 160ms ease;
+}
+
+.accordion-icon.open {
+  transform: rotate(90deg);
+}
+
 .date-row,
 .button-row {
   grid-template-columns: repeat(2, 1fr);
@@ -647,6 +694,22 @@ textarea {
   border: 1px solid var(--border);
 }
 
+.summary-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #f7faff;
+}
+
+.summary-strip-copy {
+  display: grid;
+  gap: 4px;
+}
+
 .success-card {
   text-align: center;
 }
@@ -673,6 +736,64 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: white;
+}
+
+.inline-link-button {
+  justify-self: flex-start;
+}
+
+.payment-history-list {
+  display: grid;
+  gap: 14px;
+}
+
+.payment-history-card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: white;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.payment-history-card.highlighted {
+  border-color: var(--primary);
+  background: #eef4ff;
+}
+
+.payment-history-head,
+.payment-history-meta,
+.payment-history-bills {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-history-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.payment-history-total {
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.payment-history-meta {
+  color: var(--text-soft);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.payment-history-bills {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.payment-bill-pill {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
 }
 
 .master-list {
@@ -850,8 +971,18 @@ legend {
   .sticky-summary,
   .master-card-main,
   .master-card-actions,
-  .section-actions {
+  .section-actions,
+  .payment-history-head,
+  .summary-strip {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .payment-history-head {
+    display: flex;
+  }
+
+  .payment-history-total {
     align-items: flex-start;
   }
 

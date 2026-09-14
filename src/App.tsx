@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Building2,
+  CalendarDays,
   CircleDollarSign,
   CreditCard,
   Download,
@@ -58,6 +59,46 @@ import {
 import { shareReceipt } from "./lib/receipt";
 
 type Profile = Doc<"profiles">;
+type DatePreset = "THIS_MONTH" | "PREV_MONTH" | "DATE_RANGE" | "ALL_TIME";
+type DateFilterState = {
+  preset: DatePreset;
+  fromDate: string;
+  toDate: string;
+};
+
+function resolveDateFilter(filter: DateFilterState) {
+  if (filter.preset === "ALL_TIME") {
+    return { fromDate: undefined, toDate: undefined };
+  }
+  if (filter.preset === "DATE_RANGE") {
+    return {
+      fromDate: filter.fromDate || undefined,
+      toDate: filter.toDate || undefined,
+    };
+  }
+  const referenceDate =
+    filter.preset === "PREV_MONTH" ? subMonths(new Date(), 1) : new Date();
+  return {
+    fromDate: format(startOfMonth(referenceDate), "yyyy-MM-dd"),
+    toDate: format(endOfMonth(referenceDate), "yyyy-MM-dd"),
+  };
+}
+
+function summarizeDateFilter(filter: DateFilterState) {
+  if (filter.preset === "ALL_TIME") {
+    return "All time";
+  }
+  if (filter.preset === "THIS_MONTH") {
+    return "This month";
+  }
+  if (filter.preset === "PREV_MONTH") {
+    return "Previous month";
+  }
+  if (!filter.fromDate && !filter.toDate) {
+    return "Custom range";
+  }
+  return `${filter.fromDate || "Start"} to ${filter.toDate || "End"}`;
+}
 
 export default function App() {
   return (
@@ -336,6 +377,7 @@ function OutletLayout() {
     { to: `/app/${outletId}/bills/new`, label: "Add Bill", icon: FilePlus2 },
     { to: `/app/${outletId}/payments/new`, label: "Payments", icon: ReceiptIndianRupee },
     { to: `/app/${outletId}/bills`, label: "View Bills", icon: Files },
+    { to: `/app/${outletId}/payments`, label: "View Payments", icon: CreditCard },
     { to: `/app/${outletId}/distributors`, label: "Distributors", icon: Building2 },
     { to: `/app/${outletId}/bank-accounts`, label: "Bank Accounts", icon: CreditCard },
     { to: `/app/${outletId}/outlets`, label: "Outlets", icon: Store },
@@ -421,6 +463,7 @@ function OutletLayout() {
           <Route path="bills" element={<ViewBillsPage current={current} outlet={activeOutlet} />} />
           <Route path="bills/:billId" element={<BillDetailsPage current={current} />} />
           <Route path="payments/new" element={<PaymentStartPage current={current} outlet={activeOutlet} />} />
+          <Route path="payments" element={<ViewPaymentsPage current={current} outlet={activeOutlet} />} />
           <Route path="payments/pending" element={<PendingBillsPage current={current} outlet={activeOutlet} />} />
           <Route path="payments/summary" element={<PaymentSummaryPage current={current} outlet={activeOutlet} />} />
           <Route path="payments/:paymentId/success" element={<PaymentSuccessPage current={current} />} />
@@ -625,6 +668,79 @@ function BillFormPage({
   );
 }
 
+function FilterAccordion({
+  children,
+  description,
+  open,
+  onToggle,
+  title,
+}: {
+  children: React.ReactNode;
+  description: string;
+  open: boolean;
+  onToggle: () => void;
+  title: string;
+}) {
+  return (
+    <div className={open ? "filter-accordion open" : "filter-accordion"}>
+      <button className="filter-accordion-trigger" onClick={onToggle} type="button">
+        <div className="filter-accordion-copy">
+          <strong>{title}</strong>
+          <span>{description}</span>
+        </div>
+        <ChevronRight className={open ? "accordion-icon open" : "accordion-icon"} size={18} />
+      </button>
+      {open ? <div className="filter-accordion-body">{children}</div> : null}
+    </div>
+  );
+}
+
+function DateFilterFields({
+  filter,
+  label,
+  onChange,
+}: {
+  filter: DateFilterState;
+  label: string;
+  onChange: (next: DateFilterState) => void;
+}) {
+  return (
+    <div className="stack-form">
+      <div className="segment-group">
+        {([
+          ["THIS_MONTH", "This Month"],
+          ["PREV_MONTH", "Prev Month"],
+          ["DATE_RANGE", "Date Range"],
+          ["ALL_TIME", "All Time"],
+        ] as const).map(([value, text]) => (
+          <button
+            className={filter.preset === value ? "segment active" : "segment"}
+            key={`${label}-${value}`}
+            onClick={() => onChange({ ...filter, preset: value })}
+            type="button"
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+      {filter.preset === "DATE_RANGE" ? (
+        <div className="date-row">
+          <DateField
+            label={`${label} From`}
+            value={filter.fromDate}
+            onChange={(value) => onChange({ ...filter, fromDate: value })}
+          />
+          <DateField
+            label={`${label} To`}
+            value={filter.toDate}
+            onChange={(value) => onChange({ ...filter, toDate: value })}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ViewBillsPage({
   current,
   outlet,
@@ -636,34 +752,32 @@ function ViewBillsPage({
   const [filters, setFilters] = useState({
     status: "ALL" as "ALL" | "UNPAID" | "PAID",
     distributorId: "",
-    datePreset: "THIS_MONTH" as "THIS_MONTH" | "PREV_MONTH" | "DATE_RANGE" | "ALL_TIME",
-    fromDate: "",
-    toDate: "",
+    billDate: {
+      preset: "THIS_MONTH" as DatePreset,
+      fromDate: "",
+      toDate: "",
+    },
+    paymentDate: {
+      preset: "ALL_TIME" as DatePreset,
+      fromDate: "",
+      toDate: "",
+    },
     search: "",
   });
-  const dateFilters = useMemo(() => {
-    if (filters.datePreset === "ALL_TIME") {
-      return { fromDate: undefined, toDate: undefined };
-    }
-    if (filters.datePreset === "DATE_RANGE") {
-      return {
-        fromDate: filters.fromDate || undefined,
-        toDate: filters.toDate || undefined,
-      };
-    }
-    const referenceDate =
-      filters.datePreset === "PREV_MONTH" ? subMonths(new Date(), 1) : new Date();
-    return {
-      fromDate: format(startOfMonth(referenceDate), "yyyy-MM-dd"),
-      toDate: format(endOfMonth(referenceDate), "yyyy-MM-dd"),
-    };
-  }, [filters.datePreset, filters.fromDate, filters.toDate]);
+  const [openSections, setOpenSections] = useState({
+    billDate: true,
+    paymentDate: false,
+  });
+  const billDateFilters = useMemo(() => resolveDateFilter(filters.billDate), [filters.billDate]);
+  const paymentDateFilters = useMemo(() => resolveDateFilter(filters.paymentDate), [filters.paymentDate]);
   const bills = useQuery(api.bills.listBills, {
     outletId: outlet._id,
     status: filters.status,
     distributorId: filters.distributorId ? (filters.distributorId as Id<"distributors">) : undefined,
-    fromDate: dateFilters.fromDate,
-    toDate: dateFilters.toDate,
+    billDateFrom: openSections.billDate ? billDateFilters.fromDate : undefined,
+    billDateTo: openSections.billDate ? billDateFilters.toDate : undefined,
+    paymentDateFrom: openSections.paymentDate ? paymentDateFilters.fromDate : undefined,
+    paymentDateTo: openSections.paymentDate ? paymentDateFilters.toDate : undefined,
     search: filters.search || undefined,
   });
   const navigate = useNavigate();
@@ -700,29 +814,30 @@ function ViewBillsPage({
             value={filters.distributorId}
             onChange={(value) => setFilters((curr) => ({ ...curr, distributorId: value }))}
           />
-          <div className="segment-group">
-            {([
-              ["THIS_MONTH", "This Month"],
-              ["PREV_MONTH", "Prev Month"],
-              ["DATE_RANGE", "Date Range"],
-              ["ALL_TIME", "All Time"],
-            ] as const).map(([value, label]) => (
-              <button
-                className={filters.datePreset === value ? "segment active" : "segment"}
-                key={value}
-                onClick={() => setFilters((curr) => ({ ...curr, datePreset: value }))}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {filters.datePreset === "DATE_RANGE" ? (
-            <div className="date-row">
-              <DateField label="From" value={filters.fromDate} onChange={(value) => setFilters((curr) => ({ ...curr, fromDate: value }))} />
-              <DateField label="To" value={filters.toDate} onChange={(value) => setFilters((curr) => ({ ...curr, toDate: value }))} />
-            </div>
-          ) : null}
+          <FilterAccordion
+            description={summarizeDateFilter(filters.billDate)}
+            open={openSections.billDate}
+            onToggle={() => setOpenSections((curr) => ({ ...curr, billDate: !curr.billDate }))}
+            title="Bill Date Filters"
+          >
+            <DateFilterFields
+              filter={filters.billDate}
+              label="Bill Date"
+              onChange={(value) => setFilters((curr) => ({ ...curr, billDate: value }))}
+            />
+          </FilterAccordion>
+          <FilterAccordion
+            description={summarizeDateFilter(filters.paymentDate)}
+            open={openSections.paymentDate}
+            onToggle={() => setOpenSections((curr) => ({ ...curr, paymentDate: !curr.paymentDate }))}
+            title="Payment Date Filters"
+          >
+            <DateFilterFields
+              filter={filters.paymentDate}
+              label="Payment Date"
+              onChange={(value) => setFilters((curr) => ({ ...curr, paymentDate: value }))}
+            />
+          </FilterAccordion>
           <FieldInput label="Search" value={filters.search} onChange={(value) => setFilters((curr) => ({ ...curr, search: value }))} placeholder="bill no, distributor or amount" />
         </div>
       </div>
@@ -749,7 +864,10 @@ function ViewBillsPage({
               <div>
                 <strong>{item.billNumber}</strong>
                 <span>{item.distributor?.name}</span>
-                <small>{formatDateLabel(item.billDate)}</small>
+                <small>
+                  {formatDateLabel(item.billDate)}
+                  {item.payment ? ` · Paid in ${formatCurrency(item.payment.totalAmountPaise)}` : ""}
+                </small>
               </div>
               <div className="row-end">
                 <strong>{formatCurrency(item.amountPaise)}</strong>
@@ -797,10 +915,16 @@ function BillDetailsPage({ current }: { current: { profile: Profile } }) {
           ["Bill Date", formatDateLabel(data.bill.billDate)],
           ["Amount", formatCurrency(data.bill.amountPaise)],
           ["Status", data.bill.status],
+          ["Payment Total", data.payment ? formatCurrency(data.payment.totalAmountPaise) : "-"],
           ["Payment Date", data.payment?.paymentDate ? formatDateLabel(data.payment.paymentDate) : "-"],
           ["Bank Account", data.bankAccount ? `${data.bankAccount.bankName} - ****${data.bankAccount.accountLast4}` : "-"],
         ]}
       />
+      {data.payment ? (
+        <Link className="ghost-button inline-link-button" to={`/app/${outletId}/payments?paymentId=${data.payment._id}`}>
+          View Payment Group
+        </Link>
+      ) : null}
     </section>
   );
 }
@@ -1082,43 +1206,24 @@ function PaymentSummaryPage({
       </div>
       <div className="stack-form">
         {distributor ? (
-          <div className="summary-box">
-            <div className="summary-total">
-              <div>
-                <span>Distributor</span>
-                <strong>{distributor.name}</strong>
-              </div>
-              <span className={distributor.active ? "badge paid" : "badge unpaid"}>
-                {distributor.active ? "Active" : "Inactive"}
-              </span>
+          <div className="summary-strip">
+            <div className="summary-strip-copy">
+              <span>Distributor</span>
+              <strong>{distributor.name}</strong>
             </div>
-            <div className="info-grid">
-              <div className="info-item">
-                <span>GST Number</span>
-                <strong>{distributor.gstNumber}</strong>
-              </div>
-              <div className="info-item">
-                <span>Phone</span>
-                <strong>{distributor.phone || "-"}</strong>
-              </div>
-              <div className="info-item">
-                <span>Address</span>
-                <strong>{distributor.address || "-"}</strong>
-              </div>
-              <div className="info-item">
-                <span>Selected Bills</span>
-                <strong>{selectedBills.length}</strong>
-              </div>
-            </div>
+            <span className="soft-badge">
+              {selectedBills.length} bill{selectedBills.length > 1 ? "s" : ""}
+            </span>
           </div>
         ) : null}
         <DateField label="Payment Date" value={paymentDate} onChange={setPaymentDate} />
         <SearchableSelect
+          autoFocusSearch={false}
           label="Bank Account"
           options={bankAccounts.map((item) => ({
             value: item._id,
-            label: `${item.bankName} - ${item.maskedAccount}`,
-            description: item.accountHolderName,
+            label: item.bankName,
+            description: item.maskedAccount,
           }))}
           value={bankAccountId}
           onChange={setBankAccountId}
@@ -1147,6 +1252,148 @@ function PaymentSummaryPage({
         <button className="primary-button" disabled={!bankAccountId || submitting} onClick={handleRecordPayment} type="button">
           {submitting ? "Recording..." : "I Have Paid the Bill"}
         </button>
+      </div>
+    </section>
+  );
+}
+
+function ViewPaymentsPage({
+  current,
+  outlet,
+}: {
+  current: { profile: Profile };
+  outlet: Doc<"outlets">;
+}) {
+  const distributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
+  const [searchParams] = useSearchParams();
+  const highlightedPaymentId = searchParams.get("paymentId");
+  const [filters, setFilters] = useState({
+    distributorId: "",
+    billDate: {
+      preset: "ALL_TIME" as DatePreset,
+      fromDate: "",
+      toDate: "",
+    },
+    paymentDate: {
+      preset: "THIS_MONTH" as DatePreset,
+      fromDate: "",
+      toDate: "",
+    },
+    search: "",
+  });
+  const [openSections, setOpenSections] = useState({
+    billDate: false,
+    paymentDate: true,
+  });
+  const billDateFilters = useMemo(() => resolveDateFilter(filters.billDate), [filters.billDate]);
+  const paymentDateFilters = useMemo(() => resolveDateFilter(filters.paymentDate), [filters.paymentDate]);
+  const payments = useQuery(api.payments.listPayments, {
+    outletId: outlet._id,
+    distributorId: filters.distributorId ? (filters.distributorId as Id<"distributors">) : undefined,
+    billDateFrom: openSections.billDate ? billDateFilters.fromDate : undefined,
+    billDateTo: openSections.billDate ? billDateFilters.toDate : undefined,
+    paymentDateFrom: openSections.paymentDate ? paymentDateFilters.fromDate : undefined,
+    paymentDateTo: openSections.paymentDate ? paymentDateFilters.toDate : undefined,
+    search: filters.search || undefined,
+  });
+
+  if (current.profile.role !== "OWNER") {
+    return <AccessDenied />;
+  }
+
+  return (
+    <section className="page-stack">
+      <div className="surface">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Payment groups</p>
+            <h2>View Payments</h2>
+          </div>
+        </div>
+        <div className="filter-grid">
+          <SearchableSelect
+            label="Distributor"
+            options={[{ value: "", label: "All Distributors" }, ...distributors.map((item) => ({ value: item._id, label: item.name }))]}
+            value={filters.distributorId}
+            onChange={(value) => setFilters((curr) => ({ ...curr, distributorId: value }))}
+          />
+          <FilterAccordion
+            description={summarizeDateFilter(filters.paymentDate)}
+            open={openSections.paymentDate}
+            onToggle={() => setOpenSections((curr) => ({ ...curr, paymentDate: !curr.paymentDate }))}
+            title="Payment Date Filters"
+          >
+            <DateFilterFields
+              filter={filters.paymentDate}
+              label="Payment Date"
+              onChange={(value) => setFilters((curr) => ({ ...curr, paymentDate: value }))}
+            />
+          </FilterAccordion>
+          <FilterAccordion
+            description={summarizeDateFilter(filters.billDate)}
+            open={openSections.billDate}
+            onToggle={() => setOpenSections((curr) => ({ ...curr, billDate: !curr.billDate }))}
+            title="Bill Date Filters"
+          >
+            <DateFilterFields
+              filter={filters.billDate}
+              label="Bill Date"
+              onChange={(value) => setFilters((curr) => ({ ...curr, billDate: value }))}
+            />
+          </FilterAccordion>
+          <FieldInput
+            label="Search"
+            value={filters.search}
+            onChange={(value) => setFilters((curr) => ({ ...curr, search: value }))}
+            placeholder="distributor, bank or bill number"
+          />
+        </div>
+      </div>
+
+      <div className="surface">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Grouped payment history</p>
+            <h2>{payments?.length ?? 0} Payments</h2>
+          </div>
+        </div>
+        <div className="payment-history-list">
+          {(payments ?? []).map((item) => {
+            const isHighlighted = highlightedPaymentId === item.payment._id;
+            return (
+              <div className={isHighlighted ? "payment-history-card highlighted" : "payment-history-card"} key={item.payment._id}>
+                <div className="payment-history-head">
+                  <div>
+                    <strong>{item.distributor?.name ?? "Distributor"}</strong>
+                    <span>{formatDateLabel(item.payment.paymentDate)}</span>
+                  </div>
+                  <div className="row-end payment-history-total">
+                    <strong>{formatCurrency(item.payment.totalAmountPaise)}</strong>
+                    <span>{item.bills.length} bills</span>
+                  </div>
+                </div>
+                <div className="payment-history-meta">
+                  <span>Bank: {item.bankAccount?.bankName ?? "-"}</span>
+                  <span>Payment ID: {item.payment._id.slice(-8)}</span>
+                </div>
+                <div className="payment-history-bills">
+                  {item.bills.map((bill) => (
+                    <Link className="payment-bill-pill" key={bill._id} to={`/app/${outlet._id}/bills/${bill._id}`}>
+                      <span>{bill.billNumber}</span>
+                      <strong>{formatCurrency(bill.amountPaise)}</strong>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {payments?.length === 0 ? (
+            <EmptyState
+              title="No payments found."
+              subtitle="Try a different date range or distributor filter."
+            />
+          ) : null}
+        </div>
       </div>
     </section>
   );
@@ -1836,14 +2083,25 @@ function DateField({
   const initialMonth = value ? parseISO(value) : new Date();
   const [isOpen, setIsOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(startOfMonth(initialMonth));
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const selectedDate = value ? parseISO(value) : null;
   const monthStart = startOfMonth(visibleMonth);
   const monthEnd = endOfMonth(visibleMonth);
   const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
   const leadingEmptyDays = Array.from({ length: getDay(monthStart) });
 
+  useEffect(() => {
+    if (!isOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (wrapperRef.current?.contains(event.target as Node)) return;
+      setIsOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isOpen]);
+
   return (
-    <label className="field">
+    <div className="field" ref={wrapperRef}>
       <span>{label}</span>
       <div className="date-field">
         <button
@@ -1852,7 +2110,7 @@ function DateField({
           type="button"
         >
           <span>{value ? formatDateLabel(value) : `Select ${label}`}</span>
-          <span>{isOpen ? "Close" : "Pick"}</span>
+          <CalendarDays size={18} />
         </button>
         {isOpen ? (
           <div className="date-picker-panel">
@@ -1904,17 +2162,19 @@ function DateField({
           </div>
         ) : null}
       </div>
-    </label>
+    </div>
   );
 }
 
 function SearchableSelect({
+  autoFocusSearch = true,
   className,
   label,
   value,
   onChange,
   options,
 }: {
+  autoFocusSearch?: boolean;
   className?: string;
   label: string;
   value: string;
@@ -1940,10 +2200,12 @@ function SearchableSelect({
 
   useEffect(() => {
     if (!open) return;
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    });
+    if (autoFocusSearch) {
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      });
+    }
     function handlePointerDown(event: PointerEvent) {
       if (wrapperRef.current?.contains(event.target as Node)) return;
       setOpen(false);
@@ -1951,7 +2213,7 @@ function SearchableSelect({
     }
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [open]);
+  }, [autoFocusSearch, open]);
 
   return (
     <div className={`field ${className ?? ""}`.trim()} ref={wrapperRef}>
@@ -1964,7 +2226,9 @@ function SearchableSelect({
               setOpen(true);
               return;
             }
-            inputRef.current?.focus();
+            if (autoFocusSearch) {
+              inputRef.current?.focus();
+            }
           }}
           type="button"
         >
@@ -1974,7 +2238,6 @@ function SearchableSelect({
         {open ? (
           <div className="searchable-select-panel">
             <input
-              autoFocus
               onChange={(event) => setSearch(event.target.value)}
               placeholder={`Search ${label.toLowerCase()}`}
               ref={inputRef}

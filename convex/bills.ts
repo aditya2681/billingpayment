@@ -32,8 +32,10 @@ const billFiltersValidator = {
   outletId: v.id("outlets"),
   status: v.optional(v.union(v.literal("ALL"), v.literal("UNPAID"), v.literal("PAID"))),
   distributorId: v.optional(v.id("distributors")),
-  fromDate: v.optional(v.string()),
-  toDate: v.optional(v.string()),
+  billDateFrom: v.optional(v.string()),
+  billDateTo: v.optional(v.string()),
+  paymentDateFrom: v.optional(v.string()),
+  paymentDateTo: v.optional(v.string()),
   search: v.optional(v.string()),
 };
 
@@ -114,16 +116,21 @@ export const listBills = query({
       bills = bills.filter((bill) => bill.distributorId === args.distributorId);
     }
 
-    if (args.fromDate) {
-      bills = bills.filter((bill) => bill.billDate >= args.fromDate!);
+    if (args.billDateFrom) {
+      const billDateFrom = args.billDateFrom;
+      bills = bills.filter((bill) => bill.billDate >= billDateFrom);
     }
 
-    if (args.toDate) {
-      bills = bills.filter((bill) => bill.billDate <= args.toDate!);
+    if (args.billDateTo) {
+      const billDateTo = args.billDateTo;
+      bills = bills.filter((bill) => bill.billDate <= billDateTo);
     }
 
     const distributors = await Promise.all(
       bills.map((bill) => ctx.db.get(bill.distributorId)),
+    );
+    const payments = await Promise.all(
+      bills.map((bill) => (bill.paymentId ? ctx.db.get(bill.paymentId) : Promise.resolve(null))),
     );
     const bankAccounts = await Promise.all(
       bills.map((bill) => (bill.paymentId ? loadPaymentBank(ctx, bill.paymentId) : Promise.resolve(null))),
@@ -133,11 +140,29 @@ export const listBills = query({
     const rows = bills.map((bill, index) => ({
       ...bill,
       distributor: distributors[index],
+      payment: payments[index],
       bankAccount: maskBankAccount(bankAccounts[index]),
     }));
 
+    const paymentDateFiltered = rows.filter((row) => {
+      if (!args.paymentDateFrom && !args.paymentDateTo) {
+        return true;
+      }
+      const paymentDate = row.payment?.paymentDate;
+      if (!paymentDate) {
+        return false;
+      }
+      if (args.paymentDateFrom && paymentDate < args.paymentDateFrom) {
+        return false;
+      }
+      if (args.paymentDateTo && paymentDate > args.paymentDateTo) {
+        return false;
+      }
+      return true;
+    });
+
     const filtered = searchTerm
-      ? rows.filter((row) => {
+      ? paymentDateFiltered.filter((row) => {
           const amountString = (row.amountPaise / 100).toFixed(2);
           return (
             row.billNumber.toLowerCase().includes(searchTerm) ||
@@ -145,7 +170,7 @@ export const listBills = query({
             amountString.includes(searchTerm)
           );
         })
-      : rows;
+      : paymentDateFiltered;
 
     return filtered.sort((a, b) => b.billDate.localeCompare(a.billDate));
   },
