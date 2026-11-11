@@ -1,4 +1,6 @@
 import { v } from "convex/values";
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
+import { billDocumentValidator, billHistoryRowValidator } from "./billingValidators";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
@@ -38,6 +40,12 @@ const billFiltersValidator = {
   paymentDateTo: v.optional(v.string()),
   search: v.optional(v.string()),
 };
+
+function validateBillAmount(amountPaise: number) {
+  if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0) {
+    throw new Error("Enter an amount greater than zero with at most two decimal places.");
+  }
+}
 
 async function listSimilarBillsByDateAndAmount(
   ctx: QueryCtx,
@@ -173,6 +181,83 @@ export const listBills = query({
       : paymentDateFiltered;
 
     return filtered.sort((a, b) => b.billDate.localeCompare(a.billDate));
+  },
+});
+
+// Keep the original array endpoint for older clients during a rolling release.
+// Page the indexed history before hydration, so new bills never fall behind a cap.
+export const listBillsPage = query({
+  args: { ...billFiltersValidator, paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(billHistoryRowValidator),
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const access = await requireOutletAccess(ctx, args.outletId);
+    const base = args.distributorId
+      ? ctx.db.query("bills").withIndex("by_outlet_id_and_distributor_id_and_bill_date", (q) => {
+          const range = q.eq("outletId", args.outletId).eq("distributorId", args.distributorId!);
+          if (args.billDateFrom && args.billDateTo) return range.gte("billDate", args.billDateFrom).lte("billDate", args.billDateTo);
+          if (args.billDateFrom) return range.gte("billDate", args.billDateFrom);
+          if (args.billDateTo) return range.lte("billDate", args.billDateTo);
+          return range;
+        })
+      : ctx.db.query("bills").withIndex("by_outlet_id_and_bill_date", (q) => {
+          const range = q.eq("outletId", args.outletId);
+          if (args.billDateFrom && args.billDateTo) return range.gte("billDate", args.billDateFrom).lte("billDate", args.billDateTo);
+          if (args.billDateFrom) return range.gte("billDate", args.billDateFrom);
+          if (args.billDateTo) return range.lte("billDate", args.billDateTo);
+          return range;
+        });
+    const page = await base
+      .filter((q) => q.and(
+        q.eq(q.field("ownerProfileId"), access.ownerProfileId),
+        ...(args.status && args.status !== "ALL" ? [q.eq(q.field("status"), args.status)] : []),
+      ))
+      .order("desc")
+      .paginate({ ...args.paginationOpts, maximumRowsRead: 200 });
+    const rows = await Promise.all(page.page.map(async (bill) => {
+      const distributor = await ctx.db.get(bill.distributorId);
+      const payment = bill.paymentId ? await ctx.db.get(bill.paymentId) : null;
+      const bank = payment ? await ctx.db.get(payment.bankAccountId) : null;
+      return {
+        ...bill,
+        distributor: distributor ? { _id: distributor._id, name: distributor.name } : null,
+        payment,
+        bankAccount: maskBankAccount(bank),
+      };
+    }));
+    const search = args.search?.trim().toLowerCase();
+    return {
+      ...page,
+      page: rows.filter((row) => {
+        if (args.paymentDateFrom && (!row.payment || row.payment.paymentDate < args.paymentDateFrom)) return false;
+        if (args.paymentDateTo && (!row.payment || row.payment.paymentDate > args.paymentDateTo)) return false;
+        return !search || row.billNumber.toLowerCase().includes(search) ||
+          !!row.distributor?.name.toLowerCase().includes(search) ||
+          (row.amountPaise / 100).toFixed(2).includes(search);
+      }),
+    };
+  },
+});
+
+export const getPaymentSelection = query({
+  args: {
+    outletId: v.id("outlets"),
+    distributorId: v.id("distributors"),
+    billIds: v.array(v.id("bills")),
+  },
+  returns: v.object({ bills: v.array(billDocumentValidator), invalidCount: v.number() }),
+  handler: async (ctx, args) => {
+    await requireOwner(ctx);
+    const access = await requireOutletAccess(ctx, args.outletId);
+    if (args.billIds.length > 200 || new Set(args.billIds).size !== args.billIds.length) {
+      throw new Error("Select up to 200 different bills per payment.");
+    }
+    const rows = await Promise.all(args.billIds.map((id) => ctx.db.get(id)));
+    const bills = rows.filter((bill): bill is NonNullable<typeof bill> =>
+      bill !== null && bill.ownerProfileId === access.ownerProfileId &&
+      bill.outletId === args.outletId && bill.distributorId === args.distributorId && bill.status === "UNPAID",
+    );
+    return { bills, invalidCount: args.billIds.length - bills.length };
   },
 });
 
@@ -338,6 +423,7 @@ export const createBill = mutation({
     amountPaise: v.number(),
     allowSimilarDuplicate: v.optional(v.boolean()),
   },
+  returns: v.id("bills"),
   handler: async (ctx, args) => {
     const access = await requireOutletAccess(ctx, args.outletId);
     const distributor = await ctx.db.get(args.distributorId);
@@ -345,9 +431,7 @@ export const createBill = mutation({
       throw new Error("Distributor not found.");
     }
 
-    if (args.amountPaise <= 0) {
-      throw new Error("Amount must be greater than zero.");
-    }
+    validateBillAmount(args.amountPaise);
 
     const billNumberNormalized = normalizeBillNumber(args.billNumber);
     const duplicate = await ctx.db
@@ -408,6 +492,7 @@ export const updateBill = mutation({
     amountPaise: v.number(),
     allowSimilarDuplicate: v.optional(v.boolean()),
   },
+  returns: v.union(billDocumentValidator, v.null()),
   handler: async (ctx, args) => {
     const bill = await ctx.db.get(args.billId);
     if (bill === null) {
@@ -415,6 +500,7 @@ export const updateBill = mutation({
     }
 
     const access = await requireOutletAccess(ctx, bill.outletId);
+    validateBillAmount(args.amountPaise);
     const distributor = await ctx.db.get(args.distributorId);
     if (distributor === null || distributor.ownerProfileId !== access.ownerProfileId) {
       throw new Error("Distributor not found.");

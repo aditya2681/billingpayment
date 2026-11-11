@@ -12,6 +12,7 @@ import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
 import type * as bankAccounts from "../bankAccounts.js";
+import type * as billingValidators from "../billingValidators.js";
 import type * as bills from "../bills.js";
 import type * as distributors from "../distributors.js";
 import type * as http from "../http.js";
@@ -30,6 +31,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authz: typeof authz;
   bankAccounts: typeof bankAccounts;
+  billingValidators: typeof billingValidators;
   bills: typeof bills;
   distributors: typeof distributors;
   http: typeof http;

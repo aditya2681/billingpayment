@@ -3,25 +3,28 @@ import {
   AuthLoading,
   Unauthenticated,
 } from "convex/react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
+import type { FunctionArgs, FunctionReturnType } from "convex/server";
+import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useConvexAuth, useAuthActions } from "@convex-dev/auth/react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  addMonths,
-  eachDayOfInterval,
   endOfMonth,
   format,
-  getDay,
-  isSameDay,
-  parseISO,
   startOfMonth,
   subMonths,
 } from "date-fns";
 import {
-  ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ArrowLeft,
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  Search,
+  SlidersHorizontal,
   Building2,
-  CalendarDays,
   CircleDollarSign,
   CreditCard,
   Download,
@@ -57,6 +60,7 @@ import {
   todayIso,
 } from "./lib/format";
 import { shareReceipt } from "./lib/receipt";
+import { signInErrorMessage, userErrorMessage } from "./lib/errors";
 
 type Profile = Doc<"profiles">;
 type DatePreset = "THIS_MONTH" | "PREV_MONTH" | "DATE_RANGE" | "ALL_TIME";
@@ -109,6 +113,7 @@ export default function App() {
       <Unauthenticated>
         <Routes>
           <Route path="/register-owner" element={<RegisterOwnerPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="*" element={<LoginPage />} />
         </Routes>
       </Unauthenticated>
@@ -159,7 +164,7 @@ function LoginPage() {
         navigate("/");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid credentials.");
+      setError(signInErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -173,22 +178,45 @@ function LoginPage() {
     >
       <form className="auth-card" onSubmit={onSubmit}>
         <BrandBlock />
+        <div className="auth-heading"><h1>Welcome back</h1><p>Sign in to your billing workspace.</p></div>
         <label className="field">
           <span>Login Identifier</span>
-          <input name="email" placeholder="phone or username" required />
+          <input name="email" placeholder="Phone or username" autoComplete="username" autoCapitalize="none" spellCheck={false} required aria-invalid={!!error} />
         </label>
-        <label className="field">
-          <span>Password</span>
-          <input name="password" type="password" required />
-        </label>
-        {error ? <p className="form-error">{error}</p> : null}
+        <PasswordField name="password" label="Password" autoComplete="current-password" invalid={!!error} />
+        {error ? <p className="form-error error-notice" role="alert">{error}</p> : null}
         <button className="primary-button" disabled={loading} type="submit">
           {loading ? "Signing In..." : "Sign In"}
         </button>
+        <Link className="text-link" to="/forgot-password">
+          Forgot password?
+        </Link>
         <Link className="text-link" to="/register-owner">
           Create Owner Account
         </Link>
       </form>
+    </AuthShell>
+  );
+}
+
+function ForgotPasswordPage() {
+  return (
+    <AuthShell
+      eyebrow="Account recovery"
+      title="Forgot your password?"
+      subtitle="A business owner can set a new employee password from the Employees page."
+    >
+      <div className="auth-card">
+        <BrandBlock />
+        <div className="auth-heading"><h1>Forgot your password?</h1><p>Recover access to your workspace.</p></div>
+        <p className="recovery-note">
+          The owner of your MyBilling workspace can set a temporary password for your account from
+          the Employees page. Sign in with that password once the owner shares it with you.
+        </p>
+        <Link className="text-link" to="/login">
+          Back to Sign In
+        </Link>
+      </div>
     </AuthShell>
   );
 }
@@ -213,7 +241,7 @@ function RegisterOwnerPage() {
         setPending(null);
         navigate("/select-outlet", { replace: true });
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not finish registration."));
+      .catch((err) => setError(userErrorMessage(err, "Could not finish registration.")));
   }, [bootstrapOwner, isAuthenticated, navigate, pending]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -233,7 +261,7 @@ function RegisterOwnerPage() {
       setPending({ name, loginIdentifier });
       await signIn("password", formData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create owner account.");
+      setError(userErrorMessage(err, "Could not create owner account."));
       sessionStorage.removeItem("pendingOwnerRegistration");
       setPending(null);
       setSaving(false);
@@ -248,6 +276,7 @@ function RegisterOwnerPage() {
     >
       <form className="auth-card" onSubmit={onSubmit}>
         <BrandBlock />
+        <div className="auth-heading"><h1>Create your workspace</h1><p>Start with an owner account, then add your shop.</p></div>
         <label className="field">
           <span>Owner Name</span>
           <input name="name" placeholder="Aditya Stores" required />
@@ -256,10 +285,7 @@ function RegisterOwnerPage() {
           <span>Login Identifier</span>
           <input name="email" placeholder="mobile or username" required />
         </label>
-        <label className="field">
-          <span>Password</span>
-          <input name="password" type="password" required />
-        </label>
+        <PasswordField label="Password" name="password" autoComplete="new-password" />
         {error ? <p className="form-error">{error}</p> : null}
         <button className="primary-button" disabled={saving} type="submit">
           {saving ? "Creating..." : "Create Account"}
@@ -297,7 +323,7 @@ function SelectOutletPage() {
       const outletId = await createOutlet({ name, address });
       navigate(`/app/${outletId}`, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create outlet.");
+      setError(userErrorMessage(err, "Could not create outlet."));
     } finally {
       setSaving(false);
     }
@@ -362,6 +388,8 @@ function OutletLayout() {
   const location = useLocation();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
 
+  useEffect(() => { window.scrollTo(0, 0); }, [location.pathname]);
+
   if (!outletId) return <Navigate to="/" replace />;
   if (current === undefined) {
     return <FullscreenMessage title="Loading outlet" subtitle="Preparing your dashboard..." />;
@@ -390,11 +418,11 @@ function OutletLayout() {
   const navLinks = current.profile.role === "OWNER" ? ownerLinks : employeeLinks;
   const primaryMobileLinks =
     current.profile.role === "OWNER"
-      ? navLinks.slice(0, 3)
+      ? [navLinks[0], navLinks[3], navLinks[1], navLinks[2]]
       : navLinks;
   const moreMobileLinks =
     current.profile.role === "OWNER"
-      ? navLinks.slice(3)
+      ? navLinks.filter((link) => !primaryMobileLinks.includes(link))
       : [];
 
   return (
@@ -432,6 +460,7 @@ function OutletLayout() {
               <BrandBlock compact />
               <button
                 className="ghost-button mobile-signout"
+                aria-label="Sign out"
                 onClick={() => {
                   void signOut().then(() => navigate("/login"));
                 }}
@@ -444,6 +473,9 @@ function OutletLayout() {
           <div className="header-actions">
             <SearchableSelect
               className="outlet-switcher"
+              leadingIcon={<Store size={17} aria-hidden="true" />}
+              trailingIcon={<ChevronDown size={17} aria-hidden="true" />}
+              autoFocusSearch={false}
               label="Outlet"
               options={current.accessibleOutlets.map((outlet) => ({
                 value: outlet._id,
@@ -473,7 +505,7 @@ function OutletLayout() {
           <Route path="employees" element={<EmployeesPage />} />
         </Routes>
         {isMoreOpen && moreMobileLinks.length > 0 ? (
-          <div className="mobile-more-sheet">
+          <><button className="mobile-more-backdrop" aria-label="Close navigation menu" onClick={() => setIsMoreOpen(false)} type="button" /><div className="mobile-more-sheet">
             {moreMobileLinks.map((link) => {
               const Icon = link.icon;
               const active = location.pathname === link.to;
@@ -489,26 +521,30 @@ function OutletLayout() {
                 </Link>
               );
             })}
-          </div>
+          </div></>
         ) : null}
-        <nav className="mobile-bottom-nav">
+        <nav className="mobile-bottom-nav" aria-label="Main navigation">
           {primaryMobileLinks.map((link) => {
             const Icon = link.icon;
-            const active = location.pathname === link.to;
+            const active = location.pathname === link.to ||
+              (link.to.endsWith("/payments/new") && /\/payments\/(pending|summary)/.test(location.pathname)) ||
+              (link.to.endsWith("/bills") && location.pathname.startsWith(`${link.to}/`) && !location.pathname.endsWith("/bills/new"));
             return (
               <Link
                 className={active ? "mobile-nav-link active" : "mobile-nav-link"}
                 key={link.to}
+                onClick={() => setIsMoreOpen(false)}
                 to={link.to}
               >
                 <Icon size={18} />
-                <span>{link.label === "Dashboard" ? "Home" : link.label}</span>
+                <span>{({ Dashboard: "Home", "View Bills": "Bills", "Add Bill": "Add", Payments: "Pay" } as Record<string, string>)[link.label] ?? link.label}</span>
               </Link>
             );
           })}
           {moreMobileLinks.length > 0 ? (
             <button
-              className={isMoreOpen ? "mobile-nav-link active" : "mobile-nav-link"}
+              className={isMoreOpen || moreMobileLinks.some((link) => location.pathname === link.to) ? "mobile-nav-link active" : "mobile-nav-link"}
+              aria-expanded={isMoreOpen}
               onClick={() => setIsMoreOpen((currentValue) => !currentValue)}
               type="button"
             >
@@ -536,18 +572,20 @@ function DashboardPage({
 
   return (
     <div className="page-stack">
+      <header className="page-heading"><p className="eyebrow">{outlet.name}</p><h1>Overview</h1><p>Your bills, payments and daily tasks.</p></header>
       <section className="stats-grid">
-        <StatsCard label="Total Bills" value={String(stats.totalBills)} accent="blue" />
-        <StatsCard label="Unpaid Bills" value={formatCurrency(stats.unpaidAmountPaise)} accent="red" />
-        <StatsCard label="Paid Bills" value={formatCurrency(stats.paidAmountPaise)} accent="green" />
+        <StatsCard label={stats.totalBills >= 200 ? "Bills in snapshot" : "Total bills"} value={String(stats.totalBills)} accent="blue" />
+        <StatsCard label="Unpaid amount" value={formatCurrency(stats.unpaidAmountPaise)} accent="red" />
+        <StatsCard label="Paid amount" value={formatCurrency(stats.paidAmountPaise)} accent="green" />
       </section>
+      {stats.totalBills >= 200 ? <p className="compact-note">This dashboard is a snapshot of up to 200 bills. View Bills contains the complete history.</p> : null}
 
       <section className="content-grid">
         <div className="surface">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Minimal recent activity</p>
-              <h2>Recent Bills</h2>
+              <p className="eyebrow">Activity</p>
+              <h2>{stats.totalBills >= 200 ? "Bills in snapshot" : "Recent bills"}</h2>
             </div>
             {current.profile.role === "OWNER" ? (
               <button className="ghost-button" onClick={() => navigate(`bills`)} type="button">
@@ -559,7 +597,7 @@ function DashboardPage({
             {recentBillsPreview.map((bill) => (
               <div className="bill-row" key={bill._id}>
                 <div>
-                  <strong>{bill.billNumber}</strong>
+                  <Link to={current.profile.role === "OWNER" ? `bills/${bill._id}` : `bills/${bill._id}/edit`}><strong>#{bill.billNumber}</strong></Link>
                   <span>{formatDateLabel(bill.billDate)}</span>
                 </div>
                 <div className="row-end">
@@ -581,7 +619,7 @@ function DashboardPage({
         <div className="surface">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Keep it simple</p>
+              <p className="eyebrow">Get things done</p>
               <h2>Quick Actions</h2>
             </div>
           </div>
@@ -642,6 +680,8 @@ function BillFormPage({
         amount: "",
       };
 
+  if (isEdit && billData === undefined) return <CardSkeleton title="Loading bill details" />;
+
   return (
     <section className="page-form surface">
       <div className="section-head">
@@ -651,6 +691,7 @@ function BillFormPage({
         </div>
       </div>
       <BillFormFields
+        key={billId ?? "new"}
         createBill={createBill}
         current={current}
         deleteBill={deleteBill}
@@ -683,7 +724,7 @@ function FilterAccordion({
 }) {
   return (
     <div className={open ? "filter-accordion open" : "filter-accordion"}>
-      <button className="filter-accordion-trigger" onClick={onToggle} type="button">
+      <button className="filter-accordion-trigger" aria-expanded={open} onClick={onToggle} type="button">
         <div className="filter-accordion-copy">
           <strong>{title}</strong>
           <span>{description}</span>
@@ -741,145 +782,98 @@ function DateFilterFields({
   );
 }
 
-function ViewBillsPage({
-  current,
-  outlet,
-}: {
-  current: { profile: Profile };
-  outlet: Doc<"outlets">;
-}) {
-  const distributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
-  const [filters, setFilters] = useState({
+function ViewBillsPage({ current, outlet }: { current: { profile: Profile }; outlet: Doc<"outlets"> }) {
+  const activeDistributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
+  const inactiveDistributors = useQuery(api.distributors.listDistributors, { activeOnly: false }) ?? [];
+  const initialFilters = {
     status: "ALL" as "ALL" | "UNPAID" | "PAID",
     distributorId: "",
-    billDate: {
-      preset: "THIS_MONTH" as DatePreset,
-      fromDate: "",
-      toDate: "",
-    },
-    paymentDate: {
-      preset: "ALL_TIME" as DatePreset,
-      fromDate: "",
-      toDate: "",
-    },
+    billDate: { preset: "ALL_TIME" as DatePreset, fromDate: "", toDate: "" },
+    paymentDate: { preset: "ALL_TIME" as DatePreset, fromDate: "", toDate: "" },
     search: "",
-  });
-  const [openSections, setOpenSections] = useState({
-    billDate: true,
-    paymentDate: false,
-  });
-  const billDateFilters = useMemo(() => resolveDateFilter(filters.billDate), [filters.billDate]);
-  const paymentDateFilters = useMemo(() => resolveDateFilter(filters.paymentDate), [filters.paymentDate]);
-  const bills = useQuery(api.bills.listBills, {
+  };
+  const [filters, setFilters] = useState(initialFilters);
+  const [showFilters, setShowFilters] = useState(false);
+  const [openSections, setOpenSections] = useState({ billDate: false, paymentDate: false });
+  const billDates = resolveDateFilter(filters.billDate);
+  const paymentDates = resolveDateFilter(filters.paymentDate);
+  const args = {
     outletId: outlet._id,
     status: filters.status,
-    distributorId: filters.distributorId ? (filters.distributorId as Id<"distributors">) : undefined,
-    billDateFrom: openSections.billDate ? billDateFilters.fromDate : undefined,
-    billDateTo: openSections.billDate ? billDateFilters.toDate : undefined,
-    paymentDateFrom: openSections.paymentDate ? paymentDateFilters.fromDate : undefined,
-    paymentDateTo: openSections.paymentDate ? paymentDateFilters.toDate : undefined,
-    search: filters.search || undefined,
-  });
-  const navigate = useNavigate();
-
-  if (current.profile.role !== "OWNER") {
-    return <AccessDenied />;
-  }
+    distributorId: filters.distributorId ? filters.distributorId as Id<"distributors"> : undefined,
+    billDateFrom: billDates.fromDate,
+    billDateTo: billDates.toDate,
+    paymentDateFrom: paymentDates.fromDate,
+    paymentDateTo: paymentDates.toDate,
+    search: filters.search.trim() || undefined,
+  };
+  const activeFilterCount = Number(!!filters.distributorId) + Number(filters.billDate.preset !== "ALL_TIME") + Number(filters.paymentDate.preset !== "ALL_TIME");
+  if (current.profile.role !== "OWNER") return <AccessDenied />;
 
   return (
-    <section className="page-stack">
-      <div className="surface">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Visible filters by default</p>
-            <h2>View Bills</h2>
+    <section className="page-stack history-page">
+      <header className="page-heading">
+        <div><p className="eyebrow">Your outlet ledger</p><h1>View bills</h1><p>Every bill, paid or unpaid. Newest bill dates first.</p></div>
+        <Link className="heading-action" to={`/app/${outlet._id}/bills/new`} aria-label="Add a bill"><Plus size={20} /></Link>
+      </header>
+      <div className="history-controls">
+        <label className="history-search"><Search size={18} /><input aria-label="Search bills" type="search" placeholder="Bill number, distributor or amount" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} /></label>
+        <div className="history-toolbar">
+          <div className="status-tabs" aria-label="Bill status">
+            {(["ALL", "UNPAID", "PAID"] as const).map((status) => <button type="button" key={status} aria-pressed={filters.status === status} className={filters.status === status ? "active" : ""} onClick={() => setFilters((f) => ({ ...f, status }))}>{status === "ALL" ? "All bills" : status === "UNPAID" ? "Unpaid" : "Paid"}</button>)}
           </div>
+          <button type="button" className="filter-toggle" aria-expanded={showFilters} onClick={() => setShowFilters((value) => !value)}><SlidersHorizontal size={16} /><span>Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</span></button>
         </div>
-        <div className="filter-grid">
-          <div className="segment-group">
-            {(["ALL", "UNPAID", "PAID"] as const).map((status) => (
-              <button
-                className={filters.status === status ? "segment active" : "segment"}
-                key={status}
-                onClick={() => setFilters((curr) => ({ ...curr, status }))}
-                type="button"
-              >
-                {status === "ALL" ? "All" : status === "UNPAID" ? "Unpaid" : "Paid"}
-              </button>
-            ))}
-          </div>
-          <SearchableSelect
-            label="Distributor"
-            options={[{ value: "", label: "All Distributors" }, ...distributors.map((item) => ({ value: item._id, label: item.name }))]}
-            value={filters.distributorId}
-            onChange={(value) => setFilters((curr) => ({ ...curr, distributorId: value }))}
-          />
-          <FilterAccordion
-            description={summarizeDateFilter(filters.billDate)}
-            open={openSections.billDate}
-            onToggle={() => setOpenSections((curr) => ({ ...curr, billDate: !curr.billDate }))}
-            title="Bill Date Filters"
-          >
-            <DateFilterFields
-              filter={filters.billDate}
-              label="Bill Date"
-              onChange={(value) => setFilters((curr) => ({ ...curr, billDate: value }))}
-            />
-          </FilterAccordion>
-          <FilterAccordion
-            description={summarizeDateFilter(filters.paymentDate)}
-            open={openSections.paymentDate}
-            onToggle={() => setOpenSections((curr) => ({ ...curr, paymentDate: !curr.paymentDate }))}
-            title="Payment Date Filters"
-          >
-            <DateFilterFields
-              filter={filters.paymentDate}
-              label="Payment Date"
-              onChange={(value) => setFilters((curr) => ({ ...curr, paymentDate: value }))}
-            />
-          </FilterAccordion>
-          <FieldInput label="Search" value={filters.search} onChange={(value) => setFilters((curr) => ({ ...curr, search: value }))} placeholder="bill no, distributor or amount" />
-        </div>
+        <div className="filter-context"><span>Bill date: {summarizeDateFilter(filters.billDate)}</span>{filters.paymentDate.preset !== "ALL_TIME" ? <span>Payment: {summarizeDateFilter(filters.paymentDate)}</span> : null}{activeFilterCount || filters.search || filters.status !== "ALL" ? <button type="button" onClick={() => setFilters(initialFilters)}>Clear all</button> : null}</div>
+        {showFilters ? <div className="filter-grid advanced-filters">
+          <SearchableSelect label="Distributor" options={[{ value: "", label: "All distributors" }, ...[...activeDistributors, ...inactiveDistributors].map((item) => ({ value: item._id, label: `${item.name}${item.active ? "" : " (inactive)"}` }))]} value={filters.distributorId} onChange={(value) => setFilters((f) => ({ ...f, distributorId: value }))} />
+          <FilterAccordion title="Bill date" description={summarizeDateFilter(filters.billDate)} open={openSections.billDate} onToggle={() => setOpenSections((s) => ({ ...s, billDate: !s.billDate }))}><DateFilterFields label="Bill date" filter={filters.billDate} onChange={(value) => setFilters((f) => ({ ...f, billDate: value }))} /></FilterAccordion>
+          <FilterAccordion title="Payment date" description={summarizeDateFilter(filters.paymentDate)} open={openSections.paymentDate} onToggle={() => setOpenSections((s) => ({ ...s, paymentDate: !s.paymentDate }))}><DateFilterFields label="Payment date" filter={filters.paymentDate} onChange={(value) => setFilters((f) => ({ ...f, paymentDate: value }))} /></FilterAccordion>
+        </div> : null}
       </div>
-
-      <div className="surface">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Filtered results</p>
-            <h2>{bills?.length ?? 0} Bills</h2>
-          </div>
-          <button
-            className="ghost-button"
-            disabled={!bills || bills.length === 0}
-            onClick={() => exportBillsCsv(bills ?? [])}
-            type="button"
-          >
-            <Download size={18} />
-            Export
-          </button>
-        </div>
-        <div className="bill-list">
-          {(bills ?? []).map((item) => (
-            <button className="bill-card" key={item._id} onClick={() => navigate(`/app/${outlet._id}/bills/${item._id}`)} type="button">
-              <div>
-                <strong>{item.billNumber}</strong>
-                <span>{item.distributor?.name}</span>
-                <small>
-                  {formatDateLabel(item.billDate)}
-                  {item.payment ? ` · Paid in ${formatCurrency(item.payment.totalAmountPaise)}` : ""}
-                </small>
-              </div>
-              <div className="row-end">
-                <strong>{formatCurrency(item.amountPaise)}</strong>
-                <span className={item.status === "PAID" ? "badge paid" : "badge unpaid"}>{item.status}</span>
-              </div>
-            </button>
-          ))}
-          {bills?.length === 0 ? <EmptyState title="No bills match these filters." subtitle="Try clearing the distributor, date or search filters." /> : null}
-        </div>
-      </div>
+      <BillHistoryResults key={JSON.stringify(args)} args={args} outletId={outlet._id} onClear={() => setFilters(initialFilters)} />
     </section>
   );
+}
+
+function BillHistoryResults({ args, outletId, onClear }: {
+  args: Omit<FunctionArgs<typeof api.bills.listBillsPage>, "paginationOpts">;
+  outletId: Id<"outlets">;
+  onClear: () => void;
+}) {
+  const { results: bills, loading, exhausted, loadMore } = useHistoryPagination(api.bills.listBillsPage, args);
+  const convex = useConvex();
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  async function exportAll() {
+    setExporting(true);
+    setExportError("");
+    try {
+      const all: FunctionReturnType<typeof api.bills.listBillsPage>["page"] = [];
+      let cursor: string | null = null;
+      for (;;) {
+        const page: FunctionReturnType<typeof api.bills.listBillsPage> = await convex.query(api.bills.listBillsPage, { ...args, paginationOpts: { cursor, numItems: 100 } });
+        all.push(...page.page);
+        if (page.isDone) break;
+        cursor = page.continueCursor;
+      }
+      exportBillsCsv(all);
+    } catch {
+      setExportError("Could not export bills. Please try again.");
+    } finally { setExporting(false); }
+  }
+  return <section className="history-results" aria-label="Bill results" aria-busy={loading}>
+    <div className="results-heading"><span>{bills.length ? `${bills.length}${exhausted ? "" : "+"} bill${bills.length === 1 && exhausted ? "" : "s"}${exhausted ? "" : " loaded"}` : loading ? "Loading bills…" : "0 bills"}</span><button type="button" className="text-action" disabled={exporting || !bills.length} onClick={() => void exportAll()}><Download size={15} />{exporting ? "Exporting…" : "Export all"}</button></div>
+    {exportError ? <p className="form-error" role="alert">{exportError}</p> : null}
+    <div className="ledger-list">{bills.map((bill) => <Link className="ledger-row" key={bill._id} to={`/app/${outletId}/bills/${bill._id}`}>
+      <div className="ledger-row-top"><strong>{bill.distributor?.name ?? "Unavailable distributor"}</strong><span className={bill.status === "PAID" ? "badge paid" : "badge unpaid"}>{bill.status === "PAID" ? "Paid" : "Unpaid"}</span></div>
+      <div className="ledger-row-main"><div><span className="bill-reference">#{bill.billNumber}</span><time>{formatDateLabel(bill.billDate)}</time></div><strong className="money">{formatCurrency(bill.amountPaise)}</strong></div>
+      {bill.payment ? <div className="ledger-row-foot"><Check size={12} /><span>Paid {formatDateLabel(bill.payment.paymentDate)}</span></div> : null}
+    </Link>)}</div>
+    {loading ? <div className="history-loading" role="status"><span className="loading-line" /><span className="loading-line" /><span>Loading bills…</span></div> : null}
+    {!loading && !bills.length && exhausted ? <><EmptyState title="No bills match your filters" subtitle="Clear the filters to show the full bill history for this outlet." /><button className="ghost-button" type="button" onClick={onClear}>Show all bills</button></> : null}
+    {!exhausted ? <button className="ghost-button load-more" type="button" disabled={loading} onClick={loadMore}>{loading ? "Loading…" : "Load more bills"}</button> : bills.length ? <p className="list-end">You’ve reached the end of these bills.</p> : null}
+  </section>;
 }
 
 function BillDetailsPage({ current }: { current: { profile: Profile } }) {
@@ -1032,6 +1026,7 @@ function PendingBillsPage({
   const [searchParams] = useSearchParams();
   const distributorId = searchParams.get("distributorId");
   const billId = searchParams.get("billId");
+  const prefilledBillIds = searchParams.get("billIds")?.split(",").filter(Boolean) ?? [];
   const paymentDate = searchParams.get("paymentDate") ?? todayIso();
   const pendingBills = useQuery(
     api.bills.getPendingBills,
@@ -1047,6 +1042,7 @@ function PendingBillsPage({
     <PendingBillsContent
       key={`${distributorId}-${billId ?? "all"}`}
       prefilledBillId={billId}
+      prefilledBillIds={prefilledBillIds}
       distributorId={distributorId}
       navigate={navigate}
       outletId={outlet._id}
@@ -1058,6 +1054,7 @@ function PendingBillsPage({
 
 function PendingBillsContent({
   prefilledBillId,
+  prefilledBillIds,
   distributorId,
   navigate,
   outletId,
@@ -1065,6 +1062,7 @@ function PendingBillsContent({
   pendingBills,
 }: {
   prefilledBillId: string | null;
+  prefilledBillIds: string[];
   distributorId: string;
   navigate: ReturnType<typeof useNavigate>;
   outletId: Id<"outlets">;
@@ -1072,10 +1070,11 @@ function PendingBillsContent({
   pendingBills: Doc<"bills">[];
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
-    prefilledBillId && pendingBills.some((bill) => bill._id === prefilledBillId)
-      ? [prefilledBillId]
-      : [],
+    pendingBills.filter((bill) => prefilledBillIds.includes(bill._id) || bill._id === prefilledBillId).map((bill) => bill._id),
   );
+  const [search, setSearch] = useState("");
+  const visibleBills = pendingBills.filter((bill) => `${bill.billNumber} ${bill.billDate} ${(bill.amountPaise / 100).toFixed(2)}`.toLowerCase().includes(search.trim().toLowerCase()));
+  const allVisibleSelected = visibleBills.length > 0 && visibleBills.every((bill) => selectedIds.includes(bill._id));
 
   const totalAmount = pendingBills
     .filter((bill) => selectedIds.includes(bill._id))
@@ -1091,6 +1090,7 @@ function PendingBillsContent({
           </div>
         </div>
         <div className="bill-list">
+          <label className="history-search"><Search size={17} /><input type="search" aria-label="Search pending bills" placeholder="Find a bill number or amount" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           {prefilledBillId ? (
             <div className="compact-note">
               This bill was preselected from View Bills. You can keep just this one, or add more bills from the same distributor.
@@ -1098,12 +1098,12 @@ function PendingBillsContent({
           ) : null}
           <button
             className="ghost-button"
-            onClick={() => setSelectedIds(pendingBills.map((bill) => bill._id))}
+            onClick={() => setSelectedIds((ids) => allVisibleSelected ? ids.filter((id) => !visibleBills.some((bill) => bill._id === id)) : [...new Set([...ids, ...visibleBills.map((bill) => bill._id)])])}
             type="button"
           >
-            Select All
+            {allVisibleSelected ? "Clear selection" : "Select all shown"}
           </button>
-          {pendingBills.map((bill) => (
+          {visibleBills.map((bill) => (
             <label className="bill-select-row" key={bill._id}>
               <input
                 checked={selectedIds.includes(bill._id)}
@@ -1146,20 +1146,12 @@ function PendingBillsContent({
   );
 }
 
-function PaymentSummaryPage({
-  current,
-  outlet,
-}: {
-  current: { profile: Profile };
-  outlet: Doc<"outlets">;
-}) {
+function PaymentSummaryPage({ current, outlet }: { current: { profile: Profile }; outlet: Doc<"outlets"> }) {
   const [searchParams] = useSearchParams();
   const distributorId = searchParams.get("distributorId");
   const billIds = searchParams.get("billIds")?.split(",").filter(Boolean) ?? [];
-  const pendingBills = useQuery(
-    api.bills.getPendingBills,
-    distributorId ? { outletId: outlet._id, distributorId: distributorId as Id<"distributors"> } : "skip",
-  );
+  const selection = useQuery(api.bills.getPaymentSelection,
+    distributorId && current.profile.role === "OWNER" ? { outletId: outlet._id, distributorId: distributorId as Id<"distributors">, billIds: billIds as Id<"bills">[] } : "skip");
   const activeDistributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
   const inactiveDistributors = useQuery(api.distributors.listDistributors, { activeOnly: false }) ?? [];
   const bankAccounts = useQuery(api.bankAccounts.listBankAccounts, { activeOnly: true }) ?? [];
@@ -1167,236 +1159,143 @@ function PaymentSummaryPage({
   const [bankAccountId, setBankAccountId] = useState("");
   const [paymentDate, setPaymentDate] = useState(searchParams.get("paymentDate") ?? todayIso());
   const [submitting, setSubmitting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
-
   if (current.profile.role !== "OWNER") return <AccessDenied />;
-  if (!distributorId || pendingBills === undefined) return <CardSkeleton title="Loading payment summary" />;
-  const distributor =
-    [...activeDistributors, ...inactiveDistributors].find((item) => item._id === distributorId) ?? null;
-  const selectedBills = pendingBills.filter((bill) => billIds.includes(bill._id));
+  if (!distributorId) return <Navigate to={`/app/${outlet._id}/payments/new`} replace />;
+  if (selection === undefined) return <CardSkeleton title="Loading payment summary" />;
+  const distributor = [...activeDistributors, ...inactiveDistributors].find((item) => item._id === distributorId);
+  const selectedBills = selection.bills;
   const totalAmount = selectedBills.reduce((sum, bill) => sum + bill.amountPaise, 0);
-
+  const selectionChanged = selection.invalidCount > 0;
+  const backToBills = `/app/${outlet._id}/payments/pending?distributorId=${distributorId}&paymentDate=${paymentDate}&billIds=${billIds.join(",")}`;
+  async function copyAmount() {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText((totalAmount / 100).toFixed(2));
+      setCopied(true);
+    } catch { setCopyError("Could not copy. You can select and copy the amount above."); }
+  }
   async function handleRecordPayment() {
+    if (!bankAccountId || selectionChanged || !selectedBills.length || !paymentDate || submitting) return;
     setSubmitting(true);
     setError("");
     try {
-      const result = await recordPayment({
-        outletId: outlet._id,
-        distributorId: distributorId as Id<"distributors">,
-        bankAccountId: bankAccountId as Id<"bankAccounts">,
-        paymentDate,
-        billIds: selectedBills.map((bill) => bill._id),
-      });
+      const result = await recordPayment({ outletId: outlet._id, distributorId: distributorId as Id<"distributors">, bankAccountId: bankAccountId as Id<"bankAccounts">, paymentDate, billIds: selectedBills.map((bill) => bill._id) });
       navigate(`/app/${outlet._id}/payments/${result.paymentId}/success`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not record payment.");
-    } finally {
-      setSubmitting(false);
-    }
+    } catch (err) { setError(userErrorMessage(err, "Could not record payment.")); }
+    finally { setSubmitting(false); }
   }
-
-  return (
-    <section className="surface page-stack">
-      <div className="section-head">
-        <div>
-          <p className="eyebrow">Step 3 of 3</p>
-          <h2>Payment Summary</h2>
-        </div>
-      </div>
-      <div className="stack-form">
-        {distributor ? (
-          <div className="summary-strip">
-            <div className="summary-strip-copy">
-              <span>Distributor</span>
-              <strong>{distributor.name}</strong>
-            </div>
-            <span className="soft-badge">
-              {selectedBills.length} bill{selectedBills.length > 1 ? "s" : ""}
-            </span>
-          </div>
-        ) : null}
-        <DateField label="Payment Date" value={paymentDate} onChange={setPaymentDate} />
-        <SearchableSelect
-          autoFocusSearch={false}
-          label="Bank Account"
-          options={bankAccounts.map((item) => ({
-            value: item._id,
-            label: item.bankName,
-            description: item.maskedAccount,
-          }))}
-          value={bankAccountId}
-          onChange={setBankAccountId}
-        />
-        <div className="summary-box">
-          <div className="summary-total">
-            <div>
-              <span>Total Amount</span>
-              <strong>{formatCurrency(totalAmount)}</strong>
-            </div>
-            <button className="ghost-button" onClick={() => navigator.clipboard.writeText(String(totalAmount / 100))} type="button">
-              Copy
-            </button>
-          </div>
-          {selectedBills.map((bill) => (
-            <div className="bill-row" key={bill._id}>
-              <div>
-                <strong>{bill.billNumber}</strong>
-                <span>{formatDateLabel(bill.billDate)}</span>
-              </div>
-              <strong>{formatCurrency(bill.amountPaise)}</strong>
-            </div>
-          ))}
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-button" disabled={!bankAccountId || submitting} onClick={handleRecordPayment} type="button">
-          {submitting ? "Recording..." : "I Have Paid the Bill"}
-        </button>
-      </div>
+  return <section className="page-stack payment-review">
+    <header className="page-heading"><Link className="back-link" to={backToBills}><ArrowLeft size={17} />Bill selection</Link><p className="eyebrow">Step 3 of 3 · Review</p><h1>Payment summary</h1><p>Check the bills before recording your payment.</p></header>
+    <section className="payment-amount-panel" aria-label="Total payment amount">
+      <div className="payment-payee"><span>Paying to</span><strong>{distributor?.name ?? "Distributor"}</strong></div>
+      <div className="payment-total-line"><div><span>Total amount</span><strong className="payment-total-value">{formatCurrency(totalAmount)}</strong></div><button className="copy-icon-button" aria-label={copied ? "Amount copied" : "Copy total amount"} title="Copy total amount" onClick={() => void copyAmount()} type="button">{copied ? <Check size={16} /> : <Copy size={16} />}</button></div>
+      <div className="payment-amount-caption"><span>{selectedBills.length} bill{selectedBills.length === 1 ? "" : "s"} selected</span><span role="status">{copied ? "Amount copied" : ""}</span></div>
+      {copyError ? <p className="form-error" role="alert">{copyError}</p> : null}
     </section>
-  );
+    <section className="surface payment-details"><h2>Payment details</h2><DateField label="Payment date" value={paymentDate} onChange={setPaymentDate} /><SearchableSelect autoFocusSearch={false} label="Paid from" options={bankAccounts.map((item) => ({ value: item._id, label: item.bankName, description: item.maskedAccount }))} value={bankAccountId} onChange={setBankAccountId} />{bankAccounts.length === 0 ? <Link className="text-link" to={`/app/${outlet._id}/bank-accounts`}>Add a bank account to continue</Link> : null}</section>
+    <section className="surface review-bills" aria-label="Selected bills"><div className="results-heading"><h2>Selected bills <span className="count-label">{selectedBills.length}</span></h2><Link className="text-action" to={backToBills}>Edit selection</Link></div><div className="review-bills-list">{selectedBills.map((bill, index) => <div className="review-bill-row" key={bill._id}><div><span className="review-bill-number">{String(index + 1).padStart(2, "0")}</span><div><strong>#{bill.billNumber}</strong><time>{formatDateLabel(bill.billDate)}</time></div></div><strong className="money">{formatCurrency(bill.amountPaise)}</strong></div>)}</div>{!selectedBills.length ? <p className="compact-note">No eligible bills selected. Return to bill selection.</p> : null}</section>
+    <div className="payment-confirmation">{selectionChanged ? <p className="form-error" role="alert">Some selected bills were changed or paid already. Review your bill selection before continuing.</p> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}<p>This records a payment you have already made.</p><button className="primary-button" disabled={!bankAccountId || !paymentDate || submitting || !selectedBills.length || selectionChanged} onClick={() => void handleRecordPayment()} type="button">{submitting ? "Recording payment…" : "Confirm payment recorded"}</button></div>
+  </section>;
 }
 
-function ViewPaymentsPage({
-  current,
-  outlet,
-}: {
-  current: { profile: Profile };
-  outlet: Doc<"outlets">;
-}) {
-  const distributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
+function ViewPaymentsPage({ current, outlet }: { current: { profile: Profile }; outlet: Doc<"outlets"> }) {
+  const activeDistributors = useQuery(api.distributors.listDistributors, { activeOnly: true }) ?? [];
+  const inactiveDistributors = useQuery(api.distributors.listDistributors, { activeOnly: false }) ?? [];
   const [searchParams] = useSearchParams();
-  const highlightedPaymentId = searchParams.get("paymentId");
-  const [filters, setFilters] = useState({
-    distributorId: "",
-    billDate: {
-      preset: "ALL_TIME" as DatePreset,
-      fromDate: "",
-      toDate: "",
-    },
-    paymentDate: {
-      preset: "THIS_MONTH" as DatePreset,
-      fromDate: "",
-      toDate: "",
-    },
-    search: "",
-  });
-  const [openSections, setOpenSections] = useState({
-    billDate: false,
-    paymentDate: true,
-  });
-  const billDateFilters = useMemo(() => resolveDateFilter(filters.billDate), [filters.billDate]);
-  const paymentDateFilters = useMemo(() => resolveDateFilter(filters.paymentDate), [filters.paymentDate]);
-  const payments = useQuery(api.payments.listPayments, {
-    outletId: outlet._id,
-    distributorId: filters.distributorId ? (filters.distributorId as Id<"distributors">) : undefined,
-    billDateFrom: openSections.billDate ? billDateFilters.fromDate : undefined,
-    billDateTo: openSections.billDate ? billDateFilters.toDate : undefined,
-    paymentDateFrom: openSections.paymentDate ? paymentDateFilters.fromDate : undefined,
-    paymentDateTo: openSections.paymentDate ? paymentDateFilters.toDate : undefined,
-    search: filters.search || undefined,
-  });
+  const initialFilters = {
+    distributorId: "", search: "",
+    billDate: { preset: "ALL_TIME" as DatePreset, fromDate: "", toDate: "" },
+    paymentDate: { preset: "ALL_TIME" as DatePreset, fromDate: "", toDate: "" },
+  };
+  const [filters, setFilters] = useState(initialFilters);
+  const [showFilters, setShowFilters] = useState(false);
+  const [openSections, setOpenSections] = useState({ billDate: false, paymentDate: false });
+  const billDates = resolveDateFilter(filters.billDate);
+  const paymentDates = resolveDateFilter(filters.paymentDate);
+  const args = { outletId: outlet._id,
+    distributorId: filters.distributorId ? filters.distributorId as Id<"distributors"> : undefined,
+    billDateFrom: billDates.fromDate, billDateTo: billDates.toDate,
+    paymentDateFrom: paymentDates.fromDate, paymentDateTo: paymentDates.toDate,
+    search: filters.search.trim() || undefined,
+  };
+  const activeFilterCount = Number(!!filters.distributorId) + Number(filters.billDate.preset !== "ALL_TIME") + Number(filters.paymentDate.preset !== "ALL_TIME");
+  if (current.profile.role !== "OWNER") return <AccessDenied />;
+  return <section className="page-stack history-page">
+    <header className="page-heading"><p className="eyebrow">Your payment ledger</p><h1>View payments</h1><p>Payment groups and every bill included in them.</p></header>
+    <div className="history-controls">
+      <label className="history-search"><Search size={18} /><input aria-label="Search payments" type="search" placeholder="Distributor, bank or bill number" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} /></label>
+      <div className="filter-context"><span>Payment date: {summarizeDateFilter(filters.paymentDate)}</span><button type="button" className="filter-toggle" aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)}><SlidersHorizontal size={16} />Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}</button>{activeFilterCount || filters.search ? <button type="button" onClick={() => setFilters(initialFilters)}>Clear all</button> : null}</div>
+      {showFilters ? <div className="filter-grid advanced-filters">
+        <SearchableSelect label="Distributor" options={[{ value: "", label: "All distributors" }, ...[...activeDistributors, ...inactiveDistributors].map((item) => ({ value: item._id, label: `${item.name}${item.active ? "" : " (inactive)"}` }))]} value={filters.distributorId} onChange={(value) => setFilters((f) => ({ ...f, distributorId: value }))} />
+        <FilterAccordion title="Payment date" description={summarizeDateFilter(filters.paymentDate)} open={openSections.paymentDate} onToggle={() => setOpenSections((v) => ({ ...v, paymentDate: !v.paymentDate }))}><DateFilterFields filter={filters.paymentDate} label="Payment date" onChange={(value) => setFilters((f) => ({ ...f, paymentDate: value }))} /></FilterAccordion>
+        <FilterAccordion title="Bill date" description={summarizeDateFilter(filters.billDate)} open={openSections.billDate} onToggle={() => setOpenSections((v) => ({ ...v, billDate: !v.billDate }))}><DateFilterFields filter={filters.billDate} label="Bill date" onChange={(value) => setFilters((f) => ({ ...f, billDate: value }))} /></FilterAccordion>
+      </div> : null}
+    </div>
+    <PaymentHistoryResults key={JSON.stringify(args)} args={args} outletId={outlet._id} highlightedPaymentId={searchParams.get("paymentId")} />
+  </section>;
+}
 
-  if (current.profile.role !== "OWNER") {
-    return <AccessDenied />;
+function PaymentHistoryResults({ args, outletId, highlightedPaymentId }: {
+  args: Omit<FunctionArgs<typeof api.payments.listPaymentsPage>, "paginationOpts">;
+  outletId: Id<"outlets">;
+  highlightedPaymentId: string | null;
+}) {
+  const { results: payments, loading, exhausted, loadMore } = useHistoryPagination(api.payments.listPaymentsPage, args);
+  return <section className="history-results" aria-label="Payment results" aria-busy={loading}>
+    <div className="results-heading"><span>{payments.length}{exhausted ? "" : "+"} payment group{payments.length === 1 && exhausted ? "" : "s"}{exhausted ? "" : " loaded"}</span></div>
+    <div className="payment-history-list">{payments.map((item) => <RecordedPaymentGroup key={item.payment._id} item={item} outletId={outletId} highlighted={highlightedPaymentId === item.payment._id} />)}</div>
+    {loading ? <div className="history-loading" role="status"><span className="loading-line" /><span>Loading payments…</span></div> : null}
+    {!loading && exhausted && !payments.length ? <EmptyState title="No payments match your filters" subtitle="Try clearing the filters or selecting a different date range." /> : null}
+    {!exhausted ? <button type="button" className="ghost-button load-more" disabled={loading} onClick={loadMore}>{loading ? "Loading…" : "Load more payments"}</button> : payments.length ? <p className="list-end">You’ve reached the end of these payments.</p> : null}
+  </section>;
+}
+
+function RecordedPaymentGroup({ item, outletId, highlighted }: {
+  item: FunctionReturnType<typeof api.payments.listPaymentsPage>["page"][number];
+  outletId: Id<"outlets">;
+  highlighted: boolean;
+}) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  const selectedBills = item.bills.filter((bill) => selectedIds.includes(bill._id));
+  const selectedTotal = selectedBills.reduce((sum, bill) => sum + bill.amountPaise, 0);
+  const allSelected = item.bills.length > 0 && selectedBills.length === item.bills.length;
+  function changeSelection(ids: string[]) { setSelectedIds(ids); setCopied(false); setCopyError(""); }
+  async function copySelection() {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText([
+        item.distributor?.name ?? "Distributor",
+        `Payment date: ${formatDateLabel(item.payment.paymentDate)}`,
+        ...selectedBills.map((bill) => `${bill.billNumber} · ${formatDateLabel(bill.billDate)} · ${formatCurrency(bill.amountPaise)}`),
+        `Selected total: ${formatCurrency(selectedTotal)} (${selectedBills.length} bills)`,
+        `Payment group total: ${formatCurrency(item.payment.totalAmountPaise)}`,
+      ].join("\n"));
+      setCopied(true);
+    } catch { setCopyError("Could not copy the selected bills. Please try again."); }
   }
-
-  return (
-    <section className="page-stack">
-      <div className="surface">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Payment groups</p>
-            <h2>View Payments</h2>
-          </div>
-        </div>
-        <div className="filter-grid">
-          <SearchableSelect
-            label="Distributor"
-            options={[{ value: "", label: "All Distributors" }, ...distributors.map((item) => ({ value: item._id, label: item.name }))]}
-            value={filters.distributorId}
-            onChange={(value) => setFilters((curr) => ({ ...curr, distributorId: value }))}
-          />
-          <FilterAccordion
-            description={summarizeDateFilter(filters.paymentDate)}
-            open={openSections.paymentDate}
-            onToggle={() => setOpenSections((curr) => ({ ...curr, paymentDate: !curr.paymentDate }))}
-            title="Payment Date Filters"
-          >
-            <DateFilterFields
-              filter={filters.paymentDate}
-              label="Payment Date"
-              onChange={(value) => setFilters((curr) => ({ ...curr, paymentDate: value }))}
-            />
-          </FilterAccordion>
-          <FilterAccordion
-            description={summarizeDateFilter(filters.billDate)}
-            open={openSections.billDate}
-            onToggle={() => setOpenSections((curr) => ({ ...curr, billDate: !curr.billDate }))}
-            title="Bill Date Filters"
-          >
-            <DateFilterFields
-              filter={filters.billDate}
-              label="Bill Date"
-              onChange={(value) => setFilters((curr) => ({ ...curr, billDate: value }))}
-            />
-          </FilterAccordion>
-          <FieldInput
-            label="Search"
-            value={filters.search}
-            onChange={(value) => setFilters((curr) => ({ ...curr, search: value }))}
-            placeholder="distributor, bank or bill number"
-          />
-        </div>
+  return <article className={highlighted ? "payment-history-card highlighted" : "payment-history-card"}>
+    <div className="payment-group-title"><div><strong>{item.distributor?.name ?? "Unavailable distributor"}</strong><time>{formatDateLabel(item.payment.paymentDate)}</time></div><div className="recorded-total"><span>Paid total</span><strong className="money">{formatCurrency(item.payment.totalAmountPaise)}</strong></div></div>
+    <div className="payment-history-meta"><span>{item.bankAccount?.bankName ?? "Unavailable bank"} · {item.bills.length} bills</span><Link className="text-action" to={`/app/${outletId}/payments/${item.payment._id}/success`}>Receipt<ChevronRight size={14} /></Link></div>
+    <details className="payment-group-bills" open={highlighted || undefined}>
+      <summary>View & select {item.bills.length} bill{item.bills.length === 1 ? "" : "s"}<ChevronRight size={16} /></summary>
+      <div className="recorded-bills-content">
+        <div className="recorded-selection-toolbar"><span>Choose bills to check their subtotal.</span><button type="button" className="text-action" onClick={() => changeSelection(allSelected ? [] : item.bills.map((bill) => bill._id))}>{allSelected ? "Clear all" : "Select all"}</button></div>
+        <div>{item.bills.map((bill) => <div className={selectedIds.includes(bill._id) ? "recorded-bill-row selected" : "recorded-bill-row"} key={bill._id}>
+          <label className="bill-checkbox-target"><input type="checkbox" checked={selectedIds.includes(bill._id)} onChange={(event) => changeSelection(event.target.checked ? [...selectedIds, bill._id] : selectedIds.filter((id) => id !== bill._id))} /><span className="sr-only">Select bill {bill.billNumber}</span></label>
+          <Link to={`/app/${outletId}/bills/${bill._id}`}><strong>#{bill.billNumber}</strong><time>{formatDateLabel(bill.billDate)}</time></Link>
+          <strong className="money">{formatCurrency(bill.amountPaise)}</strong>
+        </div>)}</div>
+        <div className="recorded-selection-summary" aria-live="polite"><div><span>{selectedBills.length} of {item.bills.length} bills selected</span><strong className="money">{formatCurrency(selectedTotal)}</strong></div><button className="copy-selection-button" type="button" disabled={!selectedBills.length} onClick={() => void copySelection()}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "Copied" : "Copy selection"}</button></div>
+        {copyError ? <p className="form-error" role="alert">{copyError}</p> : null}
       </div>
-
-      <div className="surface">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Grouped payment history</p>
-            <h2>{payments?.length ?? 0} Payments</h2>
-          </div>
-        </div>
-        <div className="payment-history-list">
-          {(payments ?? []).map((item) => {
-            const isHighlighted = highlightedPaymentId === item.payment._id;
-            return (
-              <div className={isHighlighted ? "payment-history-card highlighted" : "payment-history-card"} key={item.payment._id}>
-                <div className="payment-history-head">
-                  <div>
-                    <strong>{item.distributor?.name ?? "Distributor"}</strong>
-                    <span>{formatDateLabel(item.payment.paymentDate)}</span>
-                  </div>
-                  <div className="row-end payment-history-total">
-                    <strong>{formatCurrency(item.payment.totalAmountPaise)}</strong>
-                    <span>{item.bills.length} bills</span>
-                  </div>
-                </div>
-                <div className="payment-history-meta">
-                  <span>Bank: {item.bankAccount?.bankName ?? "-"}</span>
-                  <span>Payment ID: {item.payment._id.slice(-8)}</span>
-                </div>
-                <div className="payment-history-bills">
-                  {item.bills.map((bill) => (
-                    <Link className="payment-bill-pill" key={bill._id} to={`/app/${outlet._id}/bills/${bill._id}`}>
-                      <span>{bill.billNumber}</span>
-                      <strong>{formatCurrency(bill.amountPaise)}</strong>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-          {payments?.length === 0 ? (
-            <EmptyState
-              title="No payments found."
-              subtitle="Try a different date range or distributor filter."
-            />
-          ) : null}
-        </div>
-      </div>
-    </section>
-  );
+    </details>
+  </article>;
 }
 
 function PaymentSuccessPage({ current }: { current: { profile: Profile } }) {
@@ -1404,6 +1303,8 @@ function PaymentSuccessPage({ current }: { current: { profile: Profile } }) {
   const outletId = useParams().outletId;
   const payment = useQuery(api.payments.getPayment, paymentId ? { paymentId: paymentId as Id<"payments"> } : "skip");
   const receiptRef = useRef<HTMLDivElement>(null);
+  const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState("");
 
   if (current.profile.role !== "OWNER") return <AccessDenied />;
   if (payment === undefined) return <CardSkeleton title="Loading receipt" />;
@@ -1412,8 +1313,8 @@ function PaymentSuccessPage({ current }: { current: { profile: Profile } }) {
     <section className="page-stack">
       <div className="success-card">
         <div className="success-icon">✓</div>
-        <h2>Payment Recorded Successfully</h2>
-        <p>{payment.payment.billCount} bills were marked paid.</p>
+        <h2>Payment receipt</h2>
+        <p>{payment.payment.billCount} bills · Paid {formatDateLabel(payment.payment.paymentDate)}</p>
       </div>
 
       <div className="receipt-card" ref={receiptRef}>
@@ -1436,20 +1337,24 @@ function PaymentSuccessPage({ current }: { current: { profile: Profile } }) {
         </div>
       </div>
 
+      {shareError ? <p className="form-error error-notice" role="alert">{shareError}</p> : null}
       <div className="button-row">
         <Link className="ghost-button" to={`/app/${outletId}`}>
           Done
         </Link>
         <button
           className="primary-button"
-          onClick={() => {
-            if (receiptRef.current) {
-              void shareReceipt(receiptRef.current, `mybilling-payment-${payment.payment._id}.png`);
-            }
+          disabled={sharing}
+          onClick={async () => {
+            if (!receiptRef.current) return;
+            setSharing(true); setShareError("");
+            try { await shareReceipt(receiptRef.current, `mybilling-payment-${payment.payment._id}.png`); }
+            catch (err) { if (!(err instanceof DOMException && err.name === "AbortError")) setShareError("Could not share this receipt. Please try again."); }
+            finally { setSharing(false); }
           }}
           type="button"
         >
-          Share Receipt
+          {sharing ? "Preparing receipt…" : "Share receipt"}
         </button>
       </div>
     </section>
@@ -1466,6 +1371,9 @@ function DistributorsPage() {
   const [form, setForm] = useState({ name: "", gstNumber: "", phone: "", address: "" });
   const [editing, setEditing] = useState<Doc<"distributors"> | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
 
   const filteredDistributors = distributors.filter((item) => {
@@ -1486,12 +1394,16 @@ function DistributorsPage() {
   }
 
   function startCreate() {
+    setError("");
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
     setEditing(null);
     setShowForm(true);
     setForm({ name: "", gstNumber: "", phone: "", address: "" });
   }
 
   function startEdit(item: Doc<"distributors">) {
+    setError("");
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
     setEditing(item);
     setShowForm(true);
     setForm({
@@ -1503,7 +1415,8 @@ function DistributorsPage() {
   }
 
   async function toggleDistributor(item: Doc<"distributors">, active: boolean) {
-    await updateDistributor({
+    setError("");
+    try { await updateDistributor({
       distributorId: item._id,
       name: item.name,
       gstNumber: item.gstNumber,
@@ -1511,9 +1424,8 @@ function DistributorsPage() {
       address: item.address ?? undefined,
       active,
     });
-    if (editing?._id === item._id) {
-      resetForm();
-    }
+    if (editing?._id === item._id) resetForm();
+    } catch (err) { setError(userErrorMessage(err, "Could not update the distributor. Please try again.")); }
   }
 
   return (
@@ -1530,6 +1442,7 @@ function DistributorsPage() {
             Add Distributor
           </button>
         </div>
+        {error && !showForm ? <p className="form-error error-notice" role="alert">{error}</p> : null}
         <FieldInput
           label="Search Distributor"
           value={search}
@@ -1572,7 +1485,7 @@ function DistributorsPage() {
                 {item.active ? (
                   <button className="danger-button" onClick={() => void toggleDistributor(item, false)} type="button">
                     <Trash2 size={16} />
-                    Delete
+                    Deactivate
                   </button>
                 ) : (
                   <button className="ghost-button" onClick={() => void toggleDistributor(item, true)} type="button">
@@ -1585,28 +1498,24 @@ function DistributorsPage() {
           {filteredDistributors.length === 0 ? (
             <EmptyState
               title={activeTab === "ACTIVE" ? "No distributors found." : "No inactive distributors."}
-              subtitle={search ? "Try a different search." : activeTab === "ACTIVE" ? "Add your first distributor to start billing." : "Deleted distributors will appear here."}
+              subtitle={search ? "Try a different search." : activeTab === "ACTIVE" ? "Add your first distributor to start billing." : "Deactivated distributors appear here. You can restore them."}
             />
           ) : null}
         </div>
       </div>
-      <div className="surface">
+      <div className="surface distributor-editor" ref={editorRef} hidden={!showForm}>
         {showForm ? (
         <form
           className="stack-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const payload = {
-              name: form.name,
-              gstNumber: form.gstNumber,
-              phone: form.phone || undefined,
-              address: form.address || undefined,
-            };
-            if (editing) {
-              void updateDistributor({ distributorId: editing._id, active: editing.active, ...payload }).then(() => resetForm());
-            } else {
-              void createDistributor(payload).then(() => resetForm());
-            }
+          onSubmit={async (event) => {
+            event.preventDefault(); setSaving(true); setError("");
+            const payload = { name: form.name, gstNumber: form.gstNumber, phone: form.phone || undefined, address: form.address || undefined };
+            try {
+              if (editing) await updateDistributor({ distributorId: editing._id, active: editing.active, ...payload });
+              else await createDistributor(payload);
+              resetForm();
+            } catch (err) { setError(userErrorMessage(err, "Could not save the distributor. Please try again.")); }
+            finally { setSaving(false); }
           }}
         >
           <div className="section-head">
@@ -1616,12 +1525,13 @@ function DistributorsPage() {
               <p>Keep the master simple so bill entry and payments stay faster.</p>
             </div>
           </div>
-          <FieldInput label="Distributor Name" value={form.name} onChange={(value) => setForm((curr) => ({ ...curr, name: value }))} />
+          {error ? <p className="form-error error-notice" role="alert">{error}</p> : null}
+          <FieldInput required label="Distributor Name" value={form.name} onChange={(value) => setForm((curr) => ({ ...curr, name: value }))} />
           <FieldInput label="GST Number" value={form.gstNumber} onChange={(value) => setForm((curr) => ({ ...curr, gstNumber: value }))} />
           <FieldInput label="Phone" value={form.phone} onChange={(value) => setForm((curr) => ({ ...curr, phone: value }))} />
           <FieldInput label="Address" value={form.address} onChange={(value) => setForm((curr) => ({ ...curr, address: value }))} />
           <div className="button-row">
-            <button className="primary-button" type="submit">{editing ? "Update Distributor" : "Save Distributor"}</button>
+            <button className="primary-button" disabled={saving} type="submit">{saving ? "Saving…" : editing ? "Save changes" : "Add distributor"}</button>
             <button className="ghost-button" onClick={resetForm} type="button">
               Cancel
             </button>
@@ -1629,7 +1539,7 @@ function DistributorsPage() {
           {editing?.active ? (
             <button className="danger-button" onClick={() => void toggleDistributor(editing, false)} type="button">
               <Trash2 size={16} />
-              Delete Distributor
+              Deactivate distributor
             </button>
           ) : null}
         </form>
@@ -1645,68 +1555,41 @@ function DistributorsPage() {
 }
 
 function BankAccountsPage() {
-  const bankAccounts = useQuery(api.bankAccounts.listBankAccounts, { activeOnly: false }) ?? [];
+  const activeAccounts = useQuery(api.bankAccounts.listBankAccounts, { activeOnly: true }) ?? [];
+  const inactiveAccounts = useQuery(api.bankAccounts.listBankAccounts, { activeOnly: false }) ?? [];
+  const bankAccounts = [...activeAccounts, ...inactiveAccounts];
   const createBankAccount = useMutation(api.bankAccounts.createBankAccount);
   const updateBankAccount = useMutation(api.bankAccounts.updateBankAccount);
-  const [form, setForm] = useState({
-    bankName: "",
-    accountHolderName: "",
-    accountNumber: "",
-    ifscCode: "",
-    nickname: "",
-  });
-  const [editing, setEditing] = useState<Doc<"bankAccounts"> | null>(null);
-
-  return (
-    <MasterPage
-      title="Bank Accounts"
-      subtitle="Accounts are masked by default and reusable across the owner's outlets."
-      items={bankAccounts.map((item) => ({
-        id: item._id,
-        title: item.bankName,
-        subtitle: `${item.accountHolderName} - ${item.maskedAccount}`,
-        active: item.active,
-        onEdit: () => {
-          setEditing(item as unknown as Doc<"bankAccounts">);
-          setForm({
-            bankName: item.bankName,
-            accountHolderName: item.accountHolderName,
-            accountNumber: "",
-            ifscCode: item.ifscCode,
-            nickname: item.nickname ?? "",
-          });
-        },
-      }))}
-      form={
-        <form
-          className="stack-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const payload = {
-              bankName: form.bankName,
-              accountHolderName: form.accountHolderName,
-              accountNumber: form.accountNumber,
-              ifscCode: form.ifscCode,
-              nickname: form.nickname || undefined,
-            };
-            if (editing) {
-              void updateBankAccount({ bankAccountId: editing._id, active: editing.active, ...payload }).then(() => setEditing(null));
-            } else {
-              void createBankAccount(payload);
-            }
-            setForm({ bankName: "", accountHolderName: "", accountNumber: "", ifscCode: "", nickname: "" });
-          }}
-        >
-          <FieldInput label="Bank Name" value={form.bankName} onChange={(value) => setForm((curr) => ({ ...curr, bankName: value }))} />
-          <FieldInput label="Account Holder Name" value={form.accountHolderName} onChange={(value) => setForm((curr) => ({ ...curr, accountHolderName: value }))} />
-          <FieldInput label="Account Number" inputMode="numeric" value={form.accountNumber} onChange={(value) => setForm((curr) => ({ ...curr, accountNumber: value }))} />
-          <FieldInput label="IFSC Code" value={form.ifscCode} onChange={(value) => setForm((curr) => ({ ...curr, ifscCode: value }))} />
-          <FieldInput label="Nickname" value={form.nickname} onChange={(value) => setForm((curr) => ({ ...curr, nickname: value }))} />
-          <button className="primary-button" type="submit">{editing ? "Update Bank Account" : "Save Bank Account"}</button>
-        </form>
-      }
-    />
-  );
+  const emptyForm = { bankName: "", accountHolderName: "", accountNumber: "", ifscCode: "", nickname: "" };
+  const [form, setForm] = useState(emptyForm);
+  const [editing, setEditing] = useState<FunctionReturnType<typeof api.bankAccounts.listBankAccounts>[number] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setNotice(""); setSaving(true);
+    try {
+      const payload = { ...form, nickname: form.nickname || undefined };
+      if (editing) await updateBankAccount({ bankAccountId: editing._id, active: editing.active, ...payload });
+      else await createBankAccount(payload);
+      setNotice(editing ? "Bank account updated." : "Bank account added.");
+      if (!editing) setForm(emptyForm);
+    } catch (err) { setError(userErrorMessage(err, "Could not save the bank account. Please try again.")); }
+    finally { setSaving(false); }
+  }
+  return <MasterPage title="Bank Accounts" subtitle="Manage the accounts used to record payments." onCreate={() => { setEditing(null); setForm(emptyForm); setError(""); setNotice(""); }}
+    items={bankAccounts.map((item) => ({ id: item._id, title: item.bankName, subtitle: `${item.accountHolderName} · ${item.maskedAccount}`, active: item.active,
+      onEdit: () => { setEditing(item); setError(""); setNotice(""); setForm({ bankName: item.bankName, accountHolderName: item.accountHolderName, accountNumber: "", ifscCode: item.ifscCode, nickname: item.nickname ?? "" }); },
+    }))}
+    form={<form className="stack-form" onSubmit={save}>
+      <FieldInput required label="Bank name" value={form.bankName} onChange={(bankName) => setForm((f) => ({ ...f, bankName }))} />
+      <FieldInput required label="Account holder name" value={form.accountHolderName} onChange={(accountHolderName) => setForm((f) => ({ ...f, accountHolderName }))} />
+      <FieldInput required={!editing} label={editing ? "Replacement account number (optional)" : "Account number"} inputMode="numeric" placeholder={editing ? `Keep current account ${editing.maskedAccount}` : "Enter account number"} value={form.accountNumber} onChange={(accountNumber) => setForm((f) => ({ ...f, accountNumber }))} />
+      <FieldInput required label="IFSC code" value={form.ifscCode} onChange={(ifscCode) => setForm((f) => ({ ...f, ifscCode: ifscCode.toUpperCase() }))} />
+      <FieldInput label="Nickname (optional)" value={form.nickname} onChange={(nickname) => setForm((f) => ({ ...f, nickname }))} />
+      {error ? <p className="form-error error-notice" role="alert">{error}</p> : null}{notice ? <p className="form-success" role="status">{notice}</p> : null}
+      <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Add bank account"}</button>
+    </form>} />;
 }
 
 function OutletsPage() {
@@ -1715,47 +1598,46 @@ function OutletsPage() {
   const createOutlet = useMutation(api.outlets.createOutlet);
   const [form, setForm] = useState({ name: "", address: "" });
   const [editing, setEditing] = useState<Doc<"outlets"> | null>(null);
-
-  return (
-    <MasterPage
-      title="Outlets"
-      subtitle="Deactivate old outlets instead of deleting history."
-      items={outlets.map((item) => ({
-        id: item._id,
-        title: item.name,
-        subtitle: item.address ?? "No address",
-        active: item.active,
-        onEdit: () => {
-          setEditing(item);
-          setForm({ name: item.name, address: item.address ?? "" });
-        },
-      }))}
-      form={
-        <form
-          className="stack-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (editing) {
-              void updateOutlet({ outletId: editing._id, name: form.name, address: form.address || undefined, active: editing.active }).then(() => setEditing(null));
-            } else {
-              void createOutlet({ name: form.name, address: form.address || undefined });
-            }
-            setForm({ name: "", address: "" });
-          }}
-        >
-          <FieldInput label="Outlet Name" value={form.name} onChange={(value) => setForm((curr) => ({ ...curr, name: value }))} />
-          <FieldInput label="Address" value={form.address} onChange={(value) => setForm((curr) => ({ ...curr, address: value }))} />
-          <button className="primary-button" type="submit">{editing ? "Update Outlet" : "Create Outlet"}</button>
-        </form>
-      }
-    />
-  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setSaving(true); setError(""); setNotice("");
+    try {
+      if (editing) await updateOutlet({ outletId: editing._id, name: form.name, address: form.address || undefined, active: editing.active });
+      else await createOutlet({ name: form.name, address: form.address || undefined });
+      setNotice(editing ? "Outlet updated." : "Outlet added.");
+      if (!editing) setForm({ name: "", address: "" });
+    } catch (err) { setError(userErrorMessage(err, "Could not save the outlet. Please try again.")); }
+    finally { setSaving(false); }
+  }
+  return <MasterPage title="Outlets" subtitle="Keep each shop’s bills and payments in its own workspace." onCreate={() => { setEditing(null); setForm({ name: "", address: "" }); setError(""); setNotice(""); }}
+    items={outlets.map((item) => ({ id: item._id, title: item.name, subtitle: item.address ?? "No address added", active: item.active,
+      onEdit: () => { setEditing(item); setForm({ name: item.name, address: item.address ?? "" }); setError(""); setNotice(""); },
+    }))}
+    form={<form className="stack-form" onSubmit={save}>
+      <FieldInput required label="Outlet name" value={form.name} onChange={(name) => setForm((f) => ({ ...f, name }))} />
+      <FieldInput label="Address (optional)" value={form.address} onChange={(address) => setForm((f) => ({ ...f, address }))} />
+      {error ? <p className="form-error error-notice" role="alert">{error}</p> : null}{notice ? <p className="form-success" role="status">{notice}</p> : null}
+      <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Add outlet"}</button>
+    </form>} />;
 }
 
 function EmployeesPage() {
   const employees = useQuery(api.users.listEmployees, {}) ?? [];
   const outlets = useQuery(api.outlets.listAccessibleOutlets, {}) ?? [];
   const createEmployee = useAction(api.users.createEmployee);
+  const updateEmployee = useMutation(api.users.updateEmployee);
+  const [editingEmployee, setEditingEmployee] = useState<Doc<"profiles"> | null>(null);
+  const [savingEmployee, setSavingEmployee] = useState(false);
+  const [employeeError, setEmployeeError] = useState("");
+  const [employeeNotice, setEmployeeNotice] = useState("");
+  const resetEmployeePassword = useAction(api.users.resetEmployeePassword);
+  const [resetEmployeeId, setResetEmployeeId] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [resetNotice, setResetNotice] = useState("");
+  const [resetting, setResetting] = useState(false);
   const [form, setForm] = useState({
     name: "",
     loginIdentifier: "",
@@ -1766,6 +1648,7 @@ function EmployeesPage() {
   return (
     <MasterPage
       title="Employees"
+      onCreate={() => { setEditingEmployee(null); setForm({ name: "", loginIdentifier: "", password: "", outletIds: [] }); setEmployeeError(""); setEmployeeNotice(""); }}
       subtitle="Employees use the same sign-in page but only see bill entry/edit work."
       items={employees.map((item) => ({
         id: item.employee._id,
@@ -1773,6 +1656,10 @@ function EmployeesPage() {
         subtitle: `${item.employee.loginIdentifier} · ${item.outlets.map((outlet) => outlet.name).join(", ") || "No outlets"}`,
         active: item.employee.active,
         onEdit: () => {
+          setEditingEmployee(item.employee);
+          setResetEmployeeId(item.employee._id);
+          setNewPassword(""); setResetError(""); setResetNotice("");
+          setEmployeeError(""); setEmployeeNotice("");
           setForm({
             name: item.employee.name,
             loginIdentifier: item.employee.loginIdentifier,
@@ -1782,44 +1669,90 @@ function EmployeesPage() {
         },
       }))}
       form={
-        <form
-          className="stack-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void createEmployee({
-              name: form.name,
-              loginIdentifier: form.loginIdentifier,
-              password: form.password,
-              outletIds: form.outletIds as Id<"outlets">[],
-            });
-            setForm({ name: "", loginIdentifier: "", password: "", outletIds: [] });
-          }}
-        >
-          <FieldInput label="Employee Name" value={form.name} onChange={(value) => setForm((curr) => ({ ...curr, name: value }))} />
-          <FieldInput label="Login Identifier" value={form.loginIdentifier} onChange={(value) => setForm((curr) => ({ ...curr, loginIdentifier: value }))} />
-          <FieldInput label="Initial Password" type="password" value={form.password} onChange={(value) => setForm((curr) => ({ ...curr, password: value }))} />
-          <fieldset className="checkbox-group">
-            <legend>Assigned Outlets</legend>
-            {outlets.map((outlet) => (
-              <label className="checkbox-row" key={outlet._id}>
-                <input
-                  checked={form.outletIds.includes(outlet._id)}
-                  onChange={(e) =>
-                    setForm((curr) => ({
-                      ...curr,
-                      outletIds: e.target.checked
-                        ? [...curr.outletIds, outlet._id]
-                        : curr.outletIds.filter((item) => item !== outlet._id),
-                    }))
-                  }
-                  type="checkbox"
-                />
-                {outlet.name}
-              </label>
-            ))}
-          </fieldset>
-          <button className="primary-button" type="submit">Create Employee</button>
-        </form>
+        <div className="stack-form">
+          <form
+            className="stack-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setSavingEmployee(true); setEmployeeError(""); setEmployeeNotice("");
+              try {
+                if (editingEmployee) {
+                  await updateEmployee({ employeeProfileId: editingEmployee._id, name: form.name, active: editingEmployee.active, outletIds: form.outletIds as Id<"outlets">[] });
+                } else {
+                  await createEmployee({ name: form.name, loginIdentifier: form.loginIdentifier, password: form.password, outletIds: form.outletIds as Id<"outlets">[] });
+                  setForm({ name: "", loginIdentifier: "", password: "", outletIds: [] });
+                }
+                setEmployeeNotice(editingEmployee ? "Employee updated." : "Employee added.");
+              } catch (err) { setEmployeeError(userErrorMessage(err, "Could not save the employee. Please try again.")); }
+              finally { setSavingEmployee(false); }
+            }}
+          >
+            <FieldInput required label="Employee name" value={form.name} onChange={(value) => setForm((curr) => ({ ...curr, name: value }))} />
+            {editingEmployee ? <p className="compact-note">Username: {editingEmployee.loginIdentifier}</p> : <>
+              <FieldInput required label="Login identifier" value={form.loginIdentifier} onChange={(value) => setForm((curr) => ({ ...curr, loginIdentifier: value }))} />
+              <FieldInput required label="Initial password" type="password" value={form.password} onChange={(value) => setForm((curr) => ({ ...curr, password: value }))} />
+            </>}
+            <fieldset className="checkbox-group">
+              <legend>Assigned Outlets</legend>
+              {outlets.map((outlet) => (
+                <label className="checkbox-row" key={outlet._id}>
+                  <input
+                    checked={form.outletIds.includes(outlet._id)}
+                    onChange={(e) =>
+                      setForm((curr) => ({
+                        ...curr,
+                        outletIds: e.target.checked
+                          ? [...curr.outletIds, outlet._id]
+                          : curr.outletIds.filter((item) => item !== outlet._id),
+                      }))
+                    }
+                    type="checkbox"
+                  />
+                  {outlet.name}
+                </label>
+              ))}
+            </fieldset>
+            {employeeError ? <p className="form-error error-notice" role="alert">{employeeError}</p> : null}
+            {employeeNotice ? <p className="form-success" role="status">{employeeNotice}</p> : null}
+            <button className="primary-button" disabled={savingEmployee} type="submit">{savingEmployee ? "Saving…" : editingEmployee ? "Save employee changes" : "Create employee"}</button>
+          </form>
+          {editingEmployee ? <form
+            className="stack-form recovery-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setResetError("");
+              setResetNotice("");
+              setResetting(true);
+              void resetEmployeePassword({
+                employeeProfileId: resetEmployeeId as Id<"profiles">,
+                newPassword,
+              })
+                .then(() => {
+                  setResetNotice("Password reset. Share the temporary password with the employee securely.");
+                  setNewPassword("");
+                })
+                .catch((err) => setResetError(userErrorMessage(err, "Could not reset password.")))
+                .finally(() => setResetting(false));
+            }}
+          >
+            <h3>Reset Employee Password</h3>
+            <label className="field">
+              <span>Employee</span>
+              <select disabled={resetting} required value={resetEmployeeId} onChange={(event) => { setResetEmployeeId(event.target.value); setNewPassword(""); setResetError(""); setResetNotice(""); }}>
+                <option value="">Choose an employee</option>
+                {employees.map(({ employee }) => (
+                  <option key={employee._id} value={employee._id}>{employee.name} · {employee.loginIdentifier}</option>
+                ))}
+              </select>
+            </label>
+            <FieldInput label="Temporary Password (at least 8 characters)" type="password" value={newPassword} onChange={setNewPassword} />
+            {resetError ? <p className="form-error">{resetError}</p> : null}
+            {resetNotice ? <p className="form-success">{resetNotice}</p> : null}
+            <button className="primary-button" disabled={resetting || !resetEmployeeId || newPassword.length < 8} type="submit">
+              {resetting ? "Resetting..." : "Set New Password"}
+            </button>
+          </form> : null}
+        </div>
       }
     />
   );
@@ -1877,8 +1810,12 @@ function BillFormFields({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
     setError("");
+    if (!form.distributorId || !form.billNumber.trim() || !form.billDate || !Number.isFinite(Number(form.amount)) || toPaise(form.amount) <= 0) {
+      setError("Choose a distributor and enter a bill number, date and amount greater than zero.");
+      return;
+    }
+    setSaving(true);
     const allowSimilarDuplicate =
       duplicateCandidates.length > 0
         ? window.confirm(
@@ -1908,7 +1845,7 @@ function BillFormFields({
         navigate(`/app/${outlet._id}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save bill.");
+      setError(userErrorMessage(err, "Could not save bill."));
     } finally {
       setSaving(false);
     }
@@ -1922,9 +1859,9 @@ function BillFormFields({
         value={form.distributorId}
         onChange={(value) => setForm((curr) => ({ ...curr, distributorId: value }))}
       />
-      <FieldInput label="Bill Number" value={form.billNumber} onChange={(value) => setForm((curr) => ({ ...curr, billNumber: value }))} />
+      <FieldInput required label="Bill Number" value={form.billNumber} onChange={(value) => setForm((curr) => ({ ...curr, billNumber: value }))} />
       <DateField label="Bill Date" value={form.billDate} onChange={(value) => setForm((curr) => ({ ...curr, billDate: value }))} />
-      <FieldInput label="Amount" inputMode="decimal" value={form.amount} onChange={(value) => setForm((curr) => ({ ...curr, amount: value }))} />
+      <FieldInput required label="Amount" inputMode="decimal" value={form.amount} onChange={(value) => setForm((curr) => ({ ...curr, amount: value }))} />
       {duplicateCandidates.length > 0 ? (
         <div className="compact-note warning-note">
           Same distributor, same date and same amount already exist in bill
@@ -1940,11 +1877,14 @@ function BillFormFields({
       {isEdit && current.profile.role === "OWNER" && billData?.bill.status === "UNPAID" ? (
         <button
           className="danger-button"
+          disabled={saving}
           onClick={() => {
             if (!billId) return;
-            void deleteBill({ billId: billId as Id<"bills"> }).then(() =>
-              navigate(`/app/${outlet._id}/bills`),
-            );
+            setSaving(true); setError("");
+            void deleteBill({ billId: billId as Id<"bills"> })
+              .then(() => navigate(`/app/${outlet._id}/bills`))
+              .catch((err) => setError(userErrorMessage(err, "Could not delete the bill. Please try again.")))
+              .finally(() => setSaving(false));
           }}
           type="button"
         >
@@ -1955,44 +1895,25 @@ function BillFormFields({
   );
 }
 
-function MasterPage({
-  title,
-  subtitle,
-  items,
-  form,
-}: {
-  title: string;
-  subtitle: string;
+function MasterPage({ title, subtitle, items, form, onCreate }: {
+  title: string; subtitle: string;
   items: { id: string; title: string; subtitle: string; active: boolean; onEdit: () => void }[];
-  form: React.ReactNode;
+  form: React.ReactNode; onCreate?: () => void;
 }) {
-  return (
-    <section className="content-grid">
-      <div className="surface">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Masters</p>
-            <h2>{title}</h2>
-            <p>{subtitle}</p>
-          </div>
-        </div>
-        <div className="bill-list">
-          {items.map((item) => (
-            <button className="bill-card" key={item.id} onClick={item.onEdit} type="button">
-              <div>
-                <strong>{item.title}</strong>
-                <span>{item.subtitle}</span>
-              </div>
-              <span className={item.active ? "badge paid" : "badge unpaid"}>
-                {item.active ? "Active" : "Inactive"}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="surface">{form}</div>
-    </section>
-  );
+  const [showForm, setShowForm] = useState(false);
+  const [editorTitle, setEditorTitle] = useState("Add details");
+  const editorRef = useRef<HTMLDivElement>(null);
+  function revealEditor(title: string) {
+    setEditorTitle(title); setShowForm(true);
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }
+  return <section className="page-stack management-page">
+    <header className="page-heading"><p className="eyebrow">Workspace settings</p><h1>{title}</h1><p>{subtitle}</p></header>
+    <div className="management-toolbar"><span>{items.length} {items.length === 1 ? title === "Employees" ? "employee" : title === "Outlets" ? "outlet" : "bank account" : title.toLowerCase()}</span><button type="button" className="text-action" onClick={() => { onCreate?.(); revealEditor(`Add ${title === "Employees" ? "employee" : title === "Outlets" ? "outlet" : "bank account"}`); }}><Plus size={17} />Add new</button></div>
+    <div className="master-list">{items.map((item) => <button className="management-row" key={item.id} type="button" onClick={() => { item.onEdit(); revealEditor(`Edit ${title === "Employees" ? "employee" : title === "Outlets" ? "outlet" : "bank account"}`); }}><div><strong>{item.title}</strong><span>{item.subtitle}</span><span className={item.active ? "badge paid" : "badge unpaid"}>{item.active ? "Active" : "Inactive"}</span></div><ChevronRight size={18} /></button>)}</div>
+    {!items.length ? <EmptyState title={`No ${title.toLowerCase()} yet`} subtitle="Choose Add new to get started." /> : null}
+    <div ref={editorRef} className="surface management-editor" hidden={!showForm}><div className="results-heading"><h2>{editorTitle}</h2><button type="button" className="text-action" onClick={() => setShowForm(false)}>Close</button></div>{form}</div>
+  </section>;
 }
 
 function exportBillsCsv(
@@ -2042,6 +1963,11 @@ function exportBillsCsv(
   URL.revokeObjectURL(link.href);
 }
 
+function PasswordField({ label, name, autoComplete, invalid = false }: { label: string; name: string; autoComplete: string; invalid?: boolean }) {
+  const [visible, setVisible] = useState(false);
+  return <label className="field"><span>{label}</span><div className="password-field"><input aria-label={label} name={name} type={visible ? "text" : "password"} autoComplete={autoComplete} minLength={autoComplete === "new-password" ? 8 : undefined} required aria-invalid={invalid} /><button type="button" aria-label={visible ? "Hide password" : "Show password"} aria-pressed={visible} onClick={() => setVisible((value) => !value)}>{visible ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>;
+}
+
 function FieldInput({
   label,
   value,
@@ -2049,6 +1975,7 @@ function FieldInput({
   type = "text",
   inputMode,
   placeholder,
+  required = false,
 }: {
   label: string;
   value: string;
@@ -2056,11 +1983,14 @@ function FieldInput({
   type?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   placeholder?: string;
+  required?: boolean;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
       <input
+        required={required}
+        minLength={type === "password" ? 8 : undefined}
         inputMode={inputMode}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -2071,99 +2001,8 @@ function FieldInput({
   );
 }
 
-function DateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const initialMonth = value ? parseISO(value) : new Date();
-  const [isOpen, setIsOpen] = useState(false);
-  const [visibleMonth, setVisibleMonth] = useState(startOfMonth(initialMonth));
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const selectedDate = value ? parseISO(value) : null;
-  const monthStart = startOfMonth(visibleMonth);
-  const monthEnd = endOfMonth(visibleMonth);
-  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
-  const leadingEmptyDays = Array.from({ length: getDay(monthStart) });
-
-  useEffect(() => {
-    if (!isOpen) return;
-    function handlePointerDown(event: PointerEvent) {
-      if (wrapperRef.current?.contains(event.target as Node)) return;
-      setIsOpen(false);
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [isOpen]);
-
-  return (
-    <div className="field" ref={wrapperRef}>
-      <span>{label}</span>
-      <div className="date-field">
-        <button
-          className="date-field-trigger"
-          onClick={() => setIsOpen((current) => !current)}
-          type="button"
-        >
-          <span>{value ? formatDateLabel(value) : `Select ${label}`}</span>
-          <CalendarDays size={18} />
-        </button>
-        {isOpen ? (
-          <div className="date-picker-panel">
-            <div className="date-picker-header">
-              <button
-                className="ghost-button icon-button"
-                onClick={() => setVisibleMonth((current) => subMonths(current, 1))}
-                type="button"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <strong>{format(visibleMonth, "MMMM yyyy")}</strong>
-              <button
-                className="ghost-button icon-button"
-                onClick={() => setVisibleMonth((current) => addMonths(current, 1))}
-                type="button"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-            <div className="date-picker-grid date-picker-weekdays">
-              {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
-                <span key={day}>{day}</span>
-              ))}
-            </div>
-            <div className="date-picker-grid">
-              {leadingEmptyDays.map((_, index) => (
-                <span className="date-picker-empty" key={`empty-${index}`} />
-              ))}
-              {days.map((day) => {
-                const isSelected =
-                  selectedDate !== null && isSameDay(day, selectedDate);
-                return (
-                  <button
-                    className={isSelected ? "date-day active" : "date-day"}
-                    key={day.toISOString()}
-                    onClick={() => {
-                      onChange(format(day, "yyyy-MM-dd"));
-                      setIsOpen(false);
-                      setVisibleMonth(startOfMonth(day));
-                    }}
-                    type="button"
-                  >
-                    {format(day, "d")}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
+function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="field"><span>{label}</span><input type="date" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
 function SearchableSelect({
@@ -2173,6 +2012,8 @@ function SearchableSelect({
   value,
   onChange,
   options,
+  leadingIcon,
+  trailingIcon,
 }: {
   autoFocusSearch?: boolean;
   className?: string;
@@ -2180,6 +2021,8 @@ function SearchableSelect({
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string; description?: string }[];
+  leadingIcon?: React.ReactNode;
+  trailingIcon?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -2216,24 +2059,18 @@ function SearchableSelect({
   }, [autoFocusSearch, open]);
 
   return (
-    <div className={`field ${className ?? ""}`.trim()} ref={wrapperRef}>
+    <div className={`field ${className ?? ""}`.trim()} ref={wrapperRef} onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); setSearch(""); } }}>
       <span>{label}</span>
       <div className="searchable-select">
         <button
           className="searchable-select-trigger"
-          onClick={() => {
-            if (!open) {
-              setOpen(true);
-              return;
-            }
-            if (autoFocusSearch) {
-              inputRef.current?.focus();
-            }
-          }}
+          aria-label={`${label}: ${selectedOption?.label || "Select"}`}
+          aria-expanded={open}
+          onClick={() => { setOpen((value) => !value); setSearch(""); }}
           type="button"
         >
-          <span>{selectedOption?.label || `Select ${label}`}</span>
-          <span>{selectedOption ? "Change" : "Search"}</span>
+          <span className={leadingIcon ? "select-with-icon" : undefined}>{leadingIcon}<span>{selectedOption?.label || `Select ${label}`}</span></span>
+          <span className="select-trailing">{trailingIcon ?? (selectedOption ? "Change" : "Search")}</span>
         </button>
         {open ? (
           <div className="searchable-select-panel">

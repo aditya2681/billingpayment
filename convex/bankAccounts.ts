@@ -84,6 +84,7 @@ export const updateBankAccount = mutation({
     nickname: v.optional(v.string()),
     active: v.boolean(),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const owner = await requireOwner(ctx);
     const account = await ctx.db.get(args.bankAccountId);
@@ -95,11 +96,14 @@ export const updateBankAccount = mutation({
       ...account,
       accountNumberProtected: undefined,
     });
+    // The edit form never receives the full stored number. A blank replacement
+    // means keep the current account number rather than erase it.
+    const accountNumber = args.accountNumber.replace(/\s+/g, "") || account.accountNumberProtected;
     await ctx.db.patch(account._id, {
       bankName: args.bankName.trim(),
       accountHolderName: args.accountHolderName.trim(),
-      accountNumberProtected: args.accountNumber.replace(/\s+/g, ""),
-      accountLast4: maskAccountNumber(args.accountNumber),
+      accountNumberProtected: accountNumber,
+      accountLast4: maskAccountNumber(accountNumber),
       ifscCode: args.ifscCode.trim().toUpperCase(),
       nickname: args.nickname?.trim() || undefined,
       active: args.active,
@@ -114,9 +118,9 @@ export const updateBankAccount = mutation({
       entityType: "bankAccount",
       entityId: account._id,
       beforeJson: before,
-      afterJson: JSON.stringify(updated),
+      afterJson: JSON.stringify({ ...updated, accountNumberProtected: undefined }),
     });
 
-    return updated;
+    return null;
   },
 });

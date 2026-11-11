@@ -1,4 +1,9 @@
-import { createAccount, getAuthUserId } from "@convex-dev/auth/server";
+import {
+  createAccount,
+  getAuthUserId,
+  invalidateSessions,
+  modifyAccountCredentials,
+} from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -153,6 +158,65 @@ export const createEmployee = action({
     );
 
     return { profileId };
+  },
+});
+
+export const resetEmployeePassword = action({
+  args: {
+    employeeProfileId: v.id("profiles"),
+    newPassword: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (args.newPassword.length < 8) {
+      throw new Error("Password must be at least 8 characters.");
+    }
+
+    const currentUser = await ctx.runQuery(internal.users.getCurrentUserForAction, {});
+    if (currentUser.profile.role !== "OWNER") {
+      throw new Error("Only owners can reset employee passwords.");
+    }
+
+    const employee = await ctx.runQuery(internal.users.getEmployeeForPasswordReset, {
+      employeeProfileId: args.employeeProfileId,
+      ownerProfileId: currentUser.profile._id,
+    });
+
+    await modifyAccountCredentials(ctx, {
+      provider: "password",
+      account: { id: employee.loginIdentifier, secret: args.newPassword },
+    });
+    await invalidateSessions(ctx, { userId: employee.authUserId });
+    await ctx.runMutation(internal.audit.appendAuditLog, {
+      ownerProfileId: currentUser.profile._id,
+      actorProfileId: currentUser.profile._id,
+      action: "employee_password_reset",
+      entityType: "profile",
+      entityId: args.employeeProfileId,
+      afterJson: JSON.stringify({ credentialsReset: true }),
+    });
+
+    return null;
+  },
+});
+
+export const getEmployeeForPasswordReset = internalQuery({
+  args: {
+    employeeProfileId: v.id("profiles"),
+    ownerProfileId: v.id("profiles"),
+  },
+  handler: async (ctx, args) => {
+    const employee = await ctx.db.get(args.employeeProfileId);
+    if (
+      employee === null ||
+      employee.role !== "EMPLOYEE" ||
+      employee.ownerProfileId !== args.ownerProfileId
+    ) {
+      throw new Error("Employee not found.");
+    }
+    return {
+      authUserId: employee.authUserId,
+      loginIdentifier: employee.loginIdentifier,
+    };
   },
 });
 
