@@ -24,5 +24,6 @@ export function formatDateLabel(value: string) {
 }
 
 export function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }

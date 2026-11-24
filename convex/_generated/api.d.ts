@@ -18,6 +18,7 @@ import type * as distributors from "../distributors.js";
 import type * as http from "../http.js";
 import type * as outlets from "../outlets.js";
 import type * as payments from "../payments.js";
+import type * as reports from "../reports.js";
 import type * as users from "../users.js";
 
 import type {
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   outlets: typeof outlets;
   payments: typeof payments;
+  reports: typeof reports;
   users: typeof users;
 }>;
 
