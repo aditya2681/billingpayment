@@ -5,7 +5,7 @@ The GitHub Pages site is published from the `main` branch of `aditya2681/billing
 ## One-time setup
 
 1. In the repository, open **Settings → Pages** and set **Build and deployment → Source** to **GitHub Actions**.
-2. Under **Settings → Secrets and variables → Actions → Variables**, create a repository variable named `VITE_CONVEX_URL` with the production Convex deployment's `.convex.cloud` URL (currently `https://woozy-partridge-410.convex.cloud`). Verify the deployment in the Convex dashboard before changing this value. This URL is public frontend configuration, not an admin key; never put Convex deploy keys or auth private keys in it.
+2. Under **Settings → Secrets and variables → Actions → Variables**, create a repository variable named `VITE_CONVEX_URL` with the production Convex deployment's `.convex.cloud` URL (currently `https://woozy-partridge-410.eu-west-1.convex.cloud`). Verify the deployment in the Convex dashboard before changing this value. This URL is public frontend configuration, not an admin key; never put Convex deploy keys or auth private keys in it.
 3. Push the workflow in `.github/workflows/pages.yml` to `main` or run **Actions → Deploy GitHub Pages → Run workflow**. The workflow installs dependencies, runs lint and tests, builds, and publishes `dist`.
 4. Open the Pages URL on a phone. Sign in with an existing production account, check the correct outlet and bills, and test reports and a page refresh. Do not create test transactions in the production database.
 
