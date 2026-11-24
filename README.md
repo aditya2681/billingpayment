@@ -69,7 +69,7 @@ Important environment split:
    npx convex init
    ```
 
-2. Generate auth keys and set required Convex env vars:
+2. For a new deployment only, generate auth keys and set required Convex env vars. The commands below target the default **development** deployment. Do not replace keys on the existing production deployment, as doing so may affect users' sessions:
 
    ```bash
    node -e 'import("jose").then(async({generateKeyPair,exportPKCS8,exportJWK})=>{const k=await generateKeyPair("RS256",{extractable:true});const priv=await exportPKCS8(k.privateKey);const pub=await exportJWK(k.publicKey);process.stdout.write(JSON.stringify({JWT_PRIVATE_KEY:priv.trimEnd().replace(/\n/g," "),JWKS:JSON.stringify({keys:[{use:"sig",...pub}]})}))})' > .auth-keys.json
@@ -80,13 +80,13 @@ Important environment split:
    rm .auth-keys.json
    ```
 
-3. Set your frontend site URL in Convex:
+3. Set the frontend site URL for the target deployment. For the existing production site, first check the current setting; the `--prod` flag matters:
 
    ```bash
-   npx convex env set SITE_URL https://your-netlify-site.netlify.app
+   npx convex env get --prod SITE_URL
    ```
 
-4. Deploy Convex:
+4. When backend code changes need to go live, verify the target project and deploy Convex separately:
 
    ```bash
    npx convex deploy
@@ -104,11 +104,10 @@ Important environment split:
    `VITE_CONVEX_URL=<your production convex url>`
 4. Deploy the site.
 
-If your final Netlify URL changes, update Convex:
+If the Netlify URL changes, review the effect on authentication and existing users before updating the production Convex setting:
 
 ```bash
-npx convex env set SITE_URL https://your-final-site.netlify.app
-npx convex deploy
+npx convex env set --prod SITE_URL https://your-final-site.netlify.app
 ```
 
 ## Verification
