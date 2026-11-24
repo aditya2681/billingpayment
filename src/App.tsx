@@ -29,7 +29,6 @@ import {
   CreditCard,
   Download,
   FilePlus2,
-  FileSpreadsheet,
   Files,
   LayoutDashboard,
   LogOut,
@@ -62,7 +61,6 @@ import {
 } from "./lib/format";
 import { shareReceipt } from "./lib/receipt";
 import { signInErrorMessage, userErrorMessage } from "./lib/errors";
-import ReportsPage from "./pages/ReportsPage";
 
 type Profile = Doc<"profiles">;
 type DatePreset = "THIS_MONTH" | "PREV_MONTH" | "DATE_RANGE" | "ALL_TIME";
@@ -408,7 +406,6 @@ function OutletLayout() {
     { to: `/app/${outletId}/payments/new`, label: "Payments", icon: ReceiptIndianRupee },
     { to: `/app/${outletId}/bills`, label: "View Bills", icon: Files },
     { to: `/app/${outletId}/payments`, label: "View Payments", icon: CreditCard },
-    { to: `/app/${outletId}/reports`, label: "Reports", icon: FileSpreadsheet },
     { to: `/app/${outletId}/distributors`, label: "Distributors", icon: Building2 },
     { to: `/app/${outletId}/bank-accounts`, label: "Bank Accounts", icon: CreditCard },
     { to: `/app/${outletId}/outlets`, label: "Outlets", icon: Store },
@@ -506,7 +503,6 @@ function OutletLayout() {
           <Route path="bank-accounts" element={<BankAccountsPage />} />
           <Route path="outlets" element={<OutletsPage />} />
           <Route path="employees" element={<EmployeesPage />} />
-          <Route path="reports" element={current.profile.role === "OWNER" ? <ReportsPage key={activeOutlet._id} outlet={activeOutlet} /> : <AccessDenied />} />
         </Routes>
         {isMoreOpen && moreMobileLinks.length > 0 ? (
           <><button className="mobile-more-backdrop" aria-label="Close navigation menu" onClick={() => setIsMoreOpen(false)} type="button" /><div className="mobile-more-sheet">

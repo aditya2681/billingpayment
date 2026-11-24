@@ -4,7 +4,6 @@ import type { FunctionReturnType } from "convex/server";
 import { expect, test } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { groupReportRows, reportCsv, summarizeReport } from "../src/lib/reports";
 
 const modules = import.meta.glob(["./**/*.ts", "!./**/*.test.ts"]);
 const makeTest = () => convexTest(schema, modules);
@@ -178,95 +177,4 @@ test("editing bank details preserves a masked account number when no replacement
   expect(account?.bankName).toBe("Updated bank");
   const logs = await t.run((ctx) => ctx.db.query("auditLogs").take(10));
   expect(logs[0].afterJson).not.toContain("12345678");
-});
-
-test("reports preserve payment snapshots and count groups once across several bills", async () => {
-  const t = makeTest(); const data = await seed(t, 4);
-  const owner = t.withIdentity({ subject: data.userId });
-  const payment = await owner.mutation(api.payments.recordPayment, {
-    outletId: data.outletId, distributorId: data.distributorId, bankAccountId: data.bankAccountId,
-    paymentDate: "2026-11-10", billIds: data.billIds.slice(2),
-  });
-  await owner.mutation(api.bills.updateBill, {
-    billId: data.billIds[3], distributorId: data.distributorId, billNumber: "B-3",
-    billDate: "2026-11-11", amountPaise: 15000,
-  });
-  const page = await owner.query(api.reports.listReportPage, {
-    outletId: data.outletId, status: "PAID", bankAccountId: data.bankAccountId,
-    paymentDateFrom: "2026-11-01", paymentDateTo: "2026-11-30",
-    paymentGroup: `pay-${payment.paymentId.slice(-8)}`,
-    paginationOpts: { cursor: null, numItems: 100 },
-  });
-  expect(page.page).toHaveLength(2);
-  const corrected = page.page.find((row) => row._id === data.billIds[3]);
-  expect(corrected?.amountPaise).toBe(15000);
-  expect(corrected?.paidAmountPaise).toBe(10003);
-  expect(corrected?.bankAccount).not.toHaveProperty("accountNumberProtected");
-  const summary = summarizeReport(page.page);
-  expect(summary.paymentGroupCount).toBe(1);
-  expect(summary.paidAmountPaise).toBe(20005);
-  expect(summary.billAmountPaise).toBe(25002);
-  const groups = groupReportRows(page.page);
-  expect(groups).toHaveLength(1);
-  expect(groups[0].groupTotalPaise).toBe(20005);
-  expect(groups[0].includedPaidPaise).toBe(20005);
-  const partial = await owner.query(api.reports.listReportPage, {
-    outletId: data.outletId, billDateFrom: "2026-11-01", status: "PAID",
-    paginationOpts: { cursor: null, numItems: 100 },
-  });
-  expect(partial.page).toHaveLength(1);
-  expect(groupReportRows(partial.page)[0].groupTotalPaise).toBe(20005);
-  expect(groupReportRows(partial.page)[0].includedPaidPaise).toBe(10003);
-});
-
-test("reports follow sparse pages to payment groups beyond the old bill cutoff", async () => {
-  const t = makeTest(); const data = await seed(t);
-  const owner = t.withIdentity({ subject: data.userId });
-  const payment = await owner.mutation(api.payments.recordPayment, {
-    outletId: data.outletId, distributorId: data.distributorId, bankAccountId: data.bankAccountId,
-    paymentDate: "2026-11-10", billIds: [data.billIds[0]],
-  });
-  let cursor: string | null = null;
-  const rows = [];
-  let emptyPages = 0;
-  for (;;) {
-    const page: FunctionReturnType<typeof api.reports.listReportPage> = await owner.query(api.reports.listReportPage, {
-      outletId: data.outletId, paymentGroup: payment.paymentId,
-      paginationOpts: { cursor, numItems: 30 },
-    });
-    rows.push(...page.page);
-    if (!page.page.length) emptyPages++;
-    if (page.isDone) break;
-    cursor = page.continueCursor;
-  }
-  expect(emptyPages).toBeGreaterThan(0);
-  expect(rows.map((row) => row._id)).toEqual([data.billIds[0]]);
-});
-
-test("reports reject unauthorized access and invalid date ranges", async () => {
-  const t = makeTest(); const data = await seed(t, 1);
-  for (const caller of [t, t.withIdentity({ subject: data.otherUserId }), t.withIdentity({ subject: data.employeeUserId })]) {
-    await expect(caller.query(api.reports.listReportPage, { outletId: data.outletId, paginationOpts: { cursor: null, numItems: 100 } })).rejects.toThrow();
-  }
-  await expect(t.withIdentity({ subject: data.userId }).query(api.reports.listReportPage, {
-    outletId: data.outletId, billDateFrom: "2026-11-30", billDateTo: "2026-11-01",
-    paginationOpts: { cursor: null, numItems: 100 },
-  })).rejects.toThrow("end date");
-});
-
-test("customer CSV exports distinguish current bill amounts from paid amounts and escape formulas", async () => {
-  const t = makeTest(); const data = await seed(t, 1);
-  await t.run(async (ctx) => { await ctx.db.patch(data.billIds[0], { billNumber: '=HYPERLINK("example")' }); });
-  const page = await t.withIdentity({ subject: data.userId }).query(api.reports.listReportPage, {
-    outletId: data.outletId, paginationOpts: { cursor: null, numItems: 100 },
-  });
-  const csv = reportCsv(page.page, "Test outlet");
-  expect(csv.startsWith("\uFEFF")).toBe(true);
-  expect(csv).toContain("Paid against bill (INR)");
-  expect(csv).toContain("Payment date");
-  expect(csv).toContain("'\u003dHYPERLINK");
-  expect(csv).toContain('""example""');
-  expect(csv).not.toContain("12345678");
-  expect(summarizeReport(page.page).unpaidAmountPaise).toBe(10000);
-  expect(summarizeReport(page.page).paidAmountPaise).toBe(0);
 });

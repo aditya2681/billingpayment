@@ -30,7 +30,7 @@ function maskBankAccount(
   };
 }
 
-export const billFiltersValidator = {
+const billFiltersValidator = {
   outletId: v.id("outlets"),
   status: v.optional(v.union(v.literal("ALL"), v.literal("UNPAID"), v.literal("PAID"))),
   distributorId: v.optional(v.id("distributors")),
