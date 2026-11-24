@@ -14,7 +14,7 @@ MyBilling is a mobile-first bill payment tracking app built with React, Vite, an
 - Filtered bill/payment reports and customer statements with CSV export and Print / Save PDF
 
 See [Reports and customer statements](docs/reports.md) for filters, amount definitions and export instructions.
-For frontend publishing and future updates, see [GitHub Pages deployment](docs/github-pages.md).
+For frontend publishing and future updates, see [Netlify deployment](docs/netlify-deployment.md).
 
 ## Local Development
 
